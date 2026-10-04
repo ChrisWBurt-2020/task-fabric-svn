@@ -1133,7 +1133,7 @@ fn classify_task_fabric_svn(
 
 /// Render a filesystem path as speakable words: home-relative, last two
 /// components, dotfiles spoken as words ("/home/user/.config/task_fabric_svn" ->
-/// "dot-config task_fabric_svn"). Mirrors the Omarchy QML audioSanitize behavior so a
+/// "dot-config task fabric svn"). Mirrors the Omarchy QML audioSanitize behavior so a
 /// bridge-provided path survives the last hop instead of becoming "[path]".
 fn speakable_path(raw: &str) -> String {
     let trimmed = raw
@@ -2016,7 +2016,7 @@ mod tests {
         );
         assert_eq!(
             speech,
-            "Opencode needs your approval to access files in dot-config task_fabric_svn, outside the ExampleField workspace."
+            "Opencode needs your approval to access files in dot-config task fabric svn, outside the ExampleField workspace."
         );
     }
 
@@ -2113,7 +2113,7 @@ mod tests {
 
     #[test]
     fn speakable_path_renders_dotfiles_home_relative() {
-        assert_eq!(speakable_path("/home/user/.config/task_fabric_svn"), "dot-config task_fabric_svn");
+        assert_eq!(speakable_path("/home/user/.config/task_fabric_svn"), "dot-config task fabric svn");
         assert_eq!(speakable_path("~/notes/todo.md"), "notes todo.md");
         assert_eq!(speakable_path("/etc/hosts"), "etc hosts");
         assert_eq!(speakable_path("/"), "the path");

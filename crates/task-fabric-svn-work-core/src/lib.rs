@@ -1371,12 +1371,20 @@ mod tests {
 
     #[test]
     fn herdr_cwd_suggests_the_deepest_registered_project() {
+        // project_for_cwd canonicalizes repo paths, so this test needs real
+        // directories on disk instead of placeholder paths.
+        let base = std::env::temp_dir().join("task-fabric-svn-suggest-test");
+        let outer_repo = base.join("example-project");
+        let nested_repo = outer_repo.join("companion");
+        let agent_cwd = nested_repo.join("android");
+        std::fs::create_dir_all(&agent_cwd).expect("test dirs");
         let mut config = ProjectConfig::example_pilot();
+        config.projects[0].repo = outer_repo.clone();
         config.projects.push(Project {
             id: "nested".into(),
             label: "Nested project".into(),
             aliases: Vec::new(),
-            repo: PathBuf::from("/home/user/Work/example-project/companion"),
+            repo: nested_repo.clone(),
             herdr_session: Some("nested".into()),
             objective: String::new(),
             phase: String::new(),
@@ -1401,7 +1409,7 @@ mod tests {
             detail: None,
             raw_state: Some("streaming".into()),
             session: Some("nested".into()),
-            cwd: Some("/home/user/Work/example-project/companion/android".into()),
+            cwd: Some(agent_cwd.to_string_lossy().into_owned()),
             project_id: Some("nested".into()),
             duration: None,
             updated_at: None,
@@ -1409,6 +1417,7 @@ mod tests {
         let suggestion = suggest_project(&config, &[agent]).expect("project suggestion");
         assert_eq!(suggestion.id, "nested");
         assert!(suggestion.reason.contains("Herdr agent cwd"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -1482,14 +1491,14 @@ mod tests {
         config.projects.push(Project {
             id: "other".into(),
             label: "Other".into(),
-            aliases: vec!["TASK-FABRIC-SVN".into()],
+            aliases: vec!["EXAMPLE".into()],
             repo: PathBuf::from("/tmp/other"),
             ..Project::default()
         });
         let issues = config.validate();
         assert!(issues
             .iter()
-            .any(|issue| issue.contains("duplicate project identifier or alias TASK-FABRIC-SVN")));
+            .any(|issue| issue.contains("duplicate project identifier or alias EXAMPLE")));
     }
 
     #[test]

@@ -1,0 +1,56 @@
+mode = "full"
+speech = true
+master_volume = 70
+speech_volume = 80
+boost_approved = false
+speech_profile = "kokoro"
+sound_dir = "%h/.local/share/task-fabric-svn/sounds"
+template_dir = "%h/.local/share/task-fabric-svn/templates"
+voice = "%h/.local/share/task-fabric-svn/voices/en_US-lessac-medium.onnx"
+model = "%h/.local/share/task-fabric-svn/models/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+kokoro_model = "%h/.local/share/task-fabric-svn/kokoro/kokoro-v1.0.onnx"
+kokoro_voices = "%h/.local/share/task-fabric-svn/kokoro/voices-v1.0.bin"
+kokoro_voice = "af_heart"
+max_speech_per_minute = 3
+max_speech_per_10_minutes = 8
+media_ducking = true
+media_duck_percent = 35
+humor = "dry"
+# Extended humor settings (replaces the legacy `humor` key when set).
+# kind: off | dry | playful | blunt | noir | haiku
+humor_kind = "playful"
+# Let humor reach blocked/warning categories (approval/critical never joked).
+humor_failure = false
+# FNV chance (0-100) a non-playful kind fires per event.
+humor_failure_rate = 15
+# 0 = no throttling; >0 caps humor events per 10 minutes.
+humor_max_per_10_minutes = 0
+# Maximum words in a spoken phrase (default 20).
+phrase_word_cap = 20
+# Read a notification body verbatim (sanitized, up to speech_read_cap words)
+# when it has at least this many words. Humor defers to a real message.
+# 0 disables body reading.
+speech_read_min_words = 0
+speech_read_cap = 60
+# Optional phrase book, layered over the built-ins (see phrases.toml).
+# phrases_path = "%h/.config/task-fabric-svn/phrases.toml"
+# espeak-ng fallback for the last-resort speech path. It is the most robotic
+# voice and is OFF by default: when both Kokoro and Piper fail, nothing is
+# spoken instead of falling back to espeak. Set true to re-enable it.
+espeak_fallback = false
+# Global voice override: when set (non-empty), this single Kokoro voice is used
+# for EVERY context, beating per-app and per-category assignments.
+# kokoro_voice_override = "af_heart"
+# Voice resolution precedence:
+#   kokoro_voice_override > [kokoro_voices_by_app] > [kokoro_voices_by_category] > kokoro_voice
+[kokoro_voices_by_app]
+claude = "af_heart"
+codex = "am_adam"
+opencode = "af_bella"
+gemini = "af_sky"
+[kokoro_voices_by_category]
+# approval = "af_heart"
+# success = "af_heart"
+# warning = "af_heart"
+# blocked = "af_heart"
+# critical = "af_heart"

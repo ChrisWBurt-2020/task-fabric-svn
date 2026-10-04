@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+task_fabric_svn_python="${TASK_FABRIC_SVN_TTS_PYTHON:-$HOME/.local/share/task-fabric-svn/piper-venv/bin/python}"
+exec "$task_fabric_svn_python" "$HOME/.local/bin/kokoro-tts.py" "$@"

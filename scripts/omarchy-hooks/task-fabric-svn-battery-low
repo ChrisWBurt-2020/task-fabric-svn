@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -u
+
+percentage=${1:-unknown}
+case "$percentage" in
+  ''|*[!0-9]*) exit 0 ;;
+esac
+
+# Battery hooks can fire repeatedly. Keep warning audio and notifications to
+# one event per 30 minutes, with owner-only state.
+state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
+state_file="$state_home/task-fabric-svn/battery-low.last"
+now=$(date +%s)
+last=0
+if [[ -r "$state_file" ]]; then
+  read -r last <"$state_file" || last=0
+fi
+if [[ "$last" =~ ^[0-9]+$ ]] && (( now - last < 1800 )); then
+  exit 0
+fi
+
+mkdir -p "$(dirname -- "$state_file")"
+printf '%s\n' "$now" >"$state_file"
+chmod 0600 "$state_file"
+
+if command -v task-fabric-svn-work >/dev/null 2>&1; then
+  timeout --kill-after=2s 10s task-fabric-svn-work audio preview warning >/dev/null 2>&1 || true
+fi
+if command -v omarchy-notification-send >/dev/null 2>&1; then
+  omarchy-notification-send -u critical -g "󰁹" "Battery low" "Battery is at ${percentage}%"
+fi

@@ -1,0 +1,22 @@
+# Registered repositories for the Task Fabric SVN Task Supervisor.
+#
+# This is the canonical repository-identity mapping the supervisor enforces.
+# A task is launched ONLY when its target_repo_identity names one of the
+# repositories below. Anything else is refused and the task is failed in the
+# ledger with an honest reason (unregistered_repo / repo_path_invalid /
+# fingerprint_mismatch).
+#
+# Adding a repository is a deliberate, human-approved act: uncomment the
+# template, set the path and the git origin fingerprint, and commit.
+# The supervisor will run a contained worker inside that checkout, so every
+# new entry deserves a careful look.
+#
+#   fingerprint: the exact output of `git -C <path> remote get-url origin`.
+#   The supervisor re-verifies it before every launch.
+
+version = 1
+
+# Template (disabled by default):
+# [repositories.example-project]
+# path = "/home/user/Work/example-project"
+# fingerprint = "https://github.com/YOUR-USER/example-project.git"

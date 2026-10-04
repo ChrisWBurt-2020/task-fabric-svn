@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/task-fabric-svn-work-core",
+    "crates/task-fabric-svn-workd",
+    "crates/task-fabric-svn-work",
+    "crates/task-fabric-svn-soundd",
+    "crates/task-fabric-svn-experiment-worker",
+]
+
+[workspace.package]
+version = "0.10.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "1"
+toml = "0.8"
+uuid = { version = "1", features = ["v4"] }

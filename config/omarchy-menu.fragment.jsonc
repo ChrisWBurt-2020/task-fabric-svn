@@ -1,0 +1,27 @@
+// BEGIN TASK-FABRIC-SVN (managed by task-fabric-svn/install.sh)
+"task_fabric_svn": {
+  "icon": "󰌪",
+  "label": "Task Fabric SVN",
+  "description": "Project context, agents, services, and attention"
+},
+"task_fabric_svn.example-project": {
+  "icon": "󰆍",
+  "label": "Work on example project",
+  "action": "task-fabric-svn-work work example-project"
+},
+"task_fabric_svn.status": {
+  "icon": "󰋼",
+  "label": "Open Task Fabric SVN status",
+  "action": "task-fabric-svn-work status"
+},
+"task_fabric_svn.improve": {
+  "icon": "󰚩",
+  "label": "Review workstation improvement",
+  "action": "task-fabric-svn-work improve review"
+},
+"task_fabric_svn.press": {
+  "icon": "󰎞",
+  "label": "Open Example Press desk",
+  "action": "example-press-open"
+},
+// END TASK-FABRIC-SVN

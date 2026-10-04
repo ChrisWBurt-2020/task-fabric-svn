@@ -1,0 +1,49 @@
+# Example Task Fabric SVN project registry.
+#
+# Copy this file to ~/.config/task-fabric-svn/projects.toml and adapt it:
+# each project has a stable id, a repository, optional agents, declared
+# services/resources, and review-class actions. Actions are argument arrays --
+# the action runner never evaluates shell strings.
+
+version = 1
+
+[[projects]]
+id = "example-project"
+label = "Example Project"
+aliases = ["example"]
+repo = "/home/user/Work/example-project"
+objective = "Show what a registered project looks like."
+phase = "example"
+next_action = "Replace this entry with one of your own projects."
+
+[[projects.agents]]
+id = "codex"
+label = "Codex"
+kind = "herdr"
+identity = "codex"
+
+[[projects.agents]]
+id = "opencode"
+label = "opencode"
+kind = "harness"
+identity = "opencode"
+
+[[projects.resources]]
+id = "repo"
+kind = "repository"
+target = "/home/user/Work/example-project"
+
+[[projects.actions]]
+id = "open-repo"
+label = "Open repository"
+kind = "repository"
+command = ["xdg-open", "."]
+risk = "review"
+
+[[projects.actions]]
+id = "run-tests"
+label = "Run workspace tests"
+kind = "test"
+cwd = "/home/user/Work/example-project"
+command = ["cargo", "test", "--workspace"]
+risk = "review"

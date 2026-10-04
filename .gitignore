@@ -1,0 +1,7 @@
+/target
+.DS_Store
+
+__pycache__/
+*.pyc
+.docx_qa/
+.env

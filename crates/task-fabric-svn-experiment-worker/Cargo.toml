@@ -1,0 +1,12 @@
+[package]
+name = "task-fabric-svn-experiment-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Separately supervised bounded trial worker for Task Fabric SVN experiments"
+
+[dependencies]
+task-fabric-svn-work-core = { path = "../task-fabric-svn-work-core" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true

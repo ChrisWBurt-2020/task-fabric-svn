@@ -1,0 +1,29 @@
+[Unit]
+Description=Task Fabric SVN task inference proxy (%i)
+Documentation=https://github.com/quantum-heron/task-fabric-svn
+# Managed by task-fabric-svn-task-supervisor: one instance per dispatched task.
+# The instance name (%i) is the task id; the supervisor generates the
+# per-task manifest at
+#   %h/.local/state/task-fabric-svn/task-proxy/manifests/%i.json
+# before starting the instance, and the proxy binds
+#   %h/.local/state/task-fabric-svn/task-proxy/sockets/%i.socket
+# from that manifest. The HMAC secret arrives via EnvironmentFile and is
+# never logged or written anywhere by the proxy (it refuses to start
+# without it -- fail closed).
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/Work/task-fabric-svn/scripts/task_inference_proxy.py --config %h/.local/state/task-fabric-svn/task-proxy/manifests/%i.json
+EnvironmentFile=%h/.config/task_fabric_svn/task-proxy.env
+Restart=on-failure
+RestartSec=2s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/task-fabric-svn/task-proxy
+RestrictAddressFamilies=AF_UNIX AF_INET AF_NETLINK
+
+[Install]
+WantedBy=default.target

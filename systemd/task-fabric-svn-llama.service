@@ -1,0 +1,17 @@
+[Unit]
+Description=Task Fabric SVN local LLM server (notification personality quips)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/llama-server -m %h/.local/share/task-fabric-svn/models/qwen2.5-1.5b-instruct-q4_k_m.gguf --port 12121 -c 2048 --no-webui
+Restart=on-failure
+RestartSec=5s
+# 1.1GB GGUF resident plus context; cap keeps a runaway from eating the desktop.
+MemoryMax=2G
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "task-fabric-svn.audio",
+  "name": "Task Fabric SVN Audio",
+  "author": "Quantum Heron Labs",
+  "description": "Adaptive local notification sounds and speech controls",
+  "version": "0.1.0",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "BarWidget.qml" },
+  "barWidget": {
+    "displayName": "Task Fabric SVN Audio",
+    "description": "Notification audio mode and previews",
+    "category": "TaskFabricSvn",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

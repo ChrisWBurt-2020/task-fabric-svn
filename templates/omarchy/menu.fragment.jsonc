@@ -1,0 +1,26 @@
+{
+  // Merge into ~/.config/omarchy/extensions/omarchy-menu.jsonc.
+  // Commands are fixed, argument-free task-fabric-svn-work entry points. Do not add
+  // dynamic project or shell text to menu actions; project-specific actions
+  // are selected inside Task Fabric SVN Pulse and passed as argv to task-fabric-svn-work.
+  "task_fabric_svn": {
+    "icon": "󰚩",
+    "label": "Task Fabric SVN",
+    "description": "Project context, agents, services, and attention"
+  },
+  "task_fabric_svn.status": {
+    "icon": "󰋼",
+    "label": "Refresh status",
+    "action": "task-fabric-svn-work status --json >/dev/null"
+  },
+  "task_fabric_svn.doctor": {
+    "icon": "󰒓",
+    "label": "Run workstation diagnostics",
+    "action": "task-fabric-svn-work doctor"
+  },
+  "task_fabric_svn.improve": {
+    "icon": "󰁨",
+    "label": "Review friction proposals",
+    "action": "task-fabric-svn-work improve list"
+  }
+}

@@ -1,0 +1,49 @@
+# Task Fabric SVN notification phrase book — layered over the built-in spoken phrases.
+#
+# Load order (highest wins):
+#   1. per-app [phrases.<category>.<app>]
+#   2. global [phrases.<category>]
+#   3. built-in compiler templates
+#
+# A list is picked deterministically from the notification id, so the same
+# notification always says the same thing. `{app}` and `{summary}` are
+# substituted into every phrase before it is bounded to the word cap.
+
+[phrases]
+
+# Global per-category overrides. Leave a category out to keep the built-ins.
+# [phrases.approval]
+# phrases = ["{app} needs your approval.", "{app} is pausing for your nod."]
+#
+# [phrases.success]
+# phrases = ["Done. The bits survived."]
+#
+# [phrases.blocked]
+# phrases = ["Heads up — {app} hit a snag."]
+#
+# [phrases.warning]
+# phrases = ["{app} wants your attention."]
+
+# Per-app overrides rank above the global category lists.
+# [phrases.approval.opencode]
+# phrases = ["opencode is tapping its watch — your move."]
+#
+# [phrases.approval.codex]
+# phrases = ["Codex wants your approval, friend."]
+
+# Humor lists by kind. Each kind maps to a success list and (if you enable
+# humor_failure in audio.toml) a failure list. Haiku must always be an array
+# of 5-7-5 line triples. Missing sections keep the built-in lines.
+[humor]
+# dry_success = ["Done. The bits survived."]
+# playful_success = ["Task finished. No dragons detected.", "Shipped it. Go touch some grass."]
+# blunt_success = ["Done.", "Finished.", "Complete."]
+# noir_success = ["The build went quiet. Too quiet. But it passed."]
+# dry_failure = ["Well. That escalated."]
+# playful_failure = ["Oops. The build hit a wall."]
+# blunt_failure = ["It failed.", "This broke."]
+# noir_failure = ["The build went dark. Something is wrong."]
+# haiku = [
+#   ["work is done at last", "your approval still awaits", "come check on me soon"],
+#   ["the build is complete", "the terminal now goes quiet", "your input is due"],
+# ]

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -u
+
+# post-boot runs from the graphical session. Keep this hook bounded and quiet
+# on healthy systems; it must never become a boot dependency.
+if ! command -v task-fabric-svn-work >/dev/null 2>&1; then
+  exit 0
+fi
+
+doctor_output=$(timeout --kill-after=2s 15s task-fabric-svn-work doctor 2>&1) || {
+  if command -v omarchy-notification-send >/dev/null 2>&1; then
+    omarchy-notification-send -u critical -g "󰒓" "Task Fabric SVN check failed" "$doctor_output"
+  fi
+  exit 0
+}
+
+for unit in task-fabric-svn-workd.service task-fabric-svn-soundd.service; do
+  if command -v systemctl >/dev/null 2>&1 && ! systemctl --user is-active --quiet "$unit"; then
+    if command -v omarchy-notification-send >/dev/null 2>&1; then
+      omarchy-notification-send -u critical -g "󰒓" "Task Fabric SVN service needs attention" "$unit is not active"
+    fi
+  fi
+done

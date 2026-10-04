@@ -1,0 +1,24 @@
+[Unit]
+Description=Task Fabric SVN context daemon
+Documentation=https://github.com/quantum-heron/task-fabric-svn
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/task-fabric-svn-workd
+Restart=on-failure
+RestartSec=2s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/task-fabric-svn %t/task-fabric-svn
+Environment=TASK_FABRIC_SVN_WORK_CONFIG=%h/.config/task-fabric-svn/projects.toml
+Environment=TASK_FABRIC_SVN_WORK_STATE=%h/.local/state/task-fabric-svn
+Environment=TASK_FABRIC_SVN_WORK_SOCKET=%t/task-fabric-svn/daemon.sock
+RuntimeDirectory=task-fabric-svn
+RuntimeDirectoryPreserve=yes
+
+[Install]
+WantedBy=default.target

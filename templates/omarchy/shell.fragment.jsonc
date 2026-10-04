@@ -1,0 +1,12 @@
+{
+  // Merge into ~/.config/omarchy/shell.json. Keep the existing layout and
+  // prepend this entry once; the Omarchy plugin registry enables a bar plugin
+  // when its id appears in bar.layout.*.
+  "bar": {
+    "layout": {
+      "left": [
+        { "id": "task-fabric-svn.pulse" }
+      ]
+    }
+  }
+}

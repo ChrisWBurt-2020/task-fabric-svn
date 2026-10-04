@@ -1,0 +1,24 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "9router": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "9Router (isolated experiment)",
+      "options": {
+        "baseURL": "http://127.0.0.1:20128/v1",
+        "headers": {
+          "Authorization": "Bearer {env:NINEROUTER_KEY}",
+          "X-Task-Fabric-Svn-Work-Id": "{env:TASK_FABRIC_SVN_WORK_ID}",
+          "X-Task-Fabric-Svn-Trace-Id": "{env:TASK_FABRIC_SVN_TRACE_ID}"
+        }
+      },
+      "models": {
+        "gov-build": { "name": "gov-build" },
+        "gov-reason": { "name": "gov-reason" },
+        "gov-review": { "name": "gov-review" },
+        "gov-fast": { "name": "gov-fast" },
+        "gov-emergency": { "name": "gov-emergency" }
+      }
+    }
+  }
+}

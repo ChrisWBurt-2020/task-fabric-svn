@@ -1,0 +1,30 @@
+[Unit]
+Description=Task Fabric SVN Task Supervisor -- automatic task worker dispatch
+Documentation=https://github.com/quantum-heron/task-fabric-svn
+After=graphical-session.target
+
+[Service]
+Type=simple
+# Deployed: this replaced the polling task-fabric-svn-task-worker.service loop with the
+# lease-holding, reconciling supervisor. The old loop's unit and script are
+# kept in place for rollback; the service stays disabled.
+ExecStart=%h/Work/task-fabric-svn/scripts/task-fabric-svn-task-supervisor.py --loop
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/task-fabric-svn %h/Work/task-fabric-svn %h/.cache/uv
+# uv run --script needs a writable cache under the ProtectHome=read-only sandbox
+# Per-task dispatch wiring: at launch the supervisor generates a per-task
+# proxy manifest (%h/.local/state/task-fabric-svn/task-proxy/manifests/<task>.json),
+# starts task-fabric-svn-task-inference-proxy@<task>.service, waits for the contract
+# handshake, then launches the worker with --containment-config/--model.
+# The model default can be overridden without editing this unit:
+#Environment=TASK_FABRIC_SVN_TASK_MODEL=openrouter/qwen/qwen3.8-27b:free
+#Environment=TASK_FABRIC_SVN_SUPERVISOR_GRANT_CHECK=%h/.local/bin/task-fabric-svn-grant-check
+
+[Install]
+WantedBy=default.target

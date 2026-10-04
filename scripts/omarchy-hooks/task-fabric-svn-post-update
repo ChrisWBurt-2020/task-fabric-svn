@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -u
+
+# Do not rebuild repositories or restart services from an Omarchy update.
+# Verify the user-owned Task Fabric SVN layer and report exceptions only.
+if ! command -v task-fabric-svn-work >/dev/null 2>&1; then
+  exit 0
+fi
+
+doctor_output=$(timeout --kill-after=2s 15s task-fabric-svn-work doctor 2>&1) || {
+  if command -v omarchy-notification-send >/dev/null 2>&1; then
+    omarchy-notification-send -u critical -g "󰒓" "TaskFabricSvn update check failed" "$doctor_output"
+  fi
+  exit 0
+}
+
+for unit in task-fabric-svn-workd.service task-fabric-svn-soundd.service; do
+  if command -v systemctl >/dev/null 2>&1 && ! systemctl --user is-active --quiet "$unit"; then
+    if command -v omarchy-notification-send >/dev/null 2>&1; then
+      omarchy-notification-send -u critical -g "󰒓" "Task Fabric SVN service needs attention" "$unit is not active after update"
+    fi
+  fi
+done

@@ -1,0 +1,26 @@
+[Unit]
+Description=Task Fabric SVN adaptive notification audio
+After=graphical-session.target pipewire.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/task-fabric-svn-soundd
+Restart=on-failure
+RestartSec=2s
+MemoryMax=768M
+# Allow a short burst of local TTS workers without making process leaks
+# survivable; timed-out children are reaped by task-fabric-svn-soundd.
+TasksMax=128
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/task-fabric-svn %h/.cache/task-fabric-svn %t/task-fabric-svn
+Environment=TASK_FABRIC_SVN_AUDIO_CONFIG=%h/.config/task-fabric-svn/audio.toml
+Environment=TASK_FABRIC_SVN_AUDIO_SOCKET=%t/task-fabric-svn/soundd.sock
+RuntimeDirectory=task-fabric-svn
+RuntimeDirectoryPreserve=yes
+
+[Install]
+WantedBy=default.target

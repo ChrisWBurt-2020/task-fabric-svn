@@ -1,0 +1,20 @@
+[Unit]
+Description=Task Fabric SVN bounded experiment trial worker
+Documentation=https://github.com/quantum-heron/task-fabric-svn
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/task-fabric-svn-experiment-worker
+Restart=on-failure
+RestartSec=2s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/task-fabric-svn
+Environment=TASK_FABRIC_SVN_WORK_STATE=%h/.local/state/task-fabric-svn
+
+[Install]
+WantedBy=default.target

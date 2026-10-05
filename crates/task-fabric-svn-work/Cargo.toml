@@ -12,4 +12,5 @@ path = "src/main.rs"
 [dependencies]
 task-fabric-svn-work-core = { path = "../task-fabric-svn-work-core" }
 serde_json.workspace = true
+sha2.workspace = true
 toml.workspace = true

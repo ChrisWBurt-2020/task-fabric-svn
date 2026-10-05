@@ -306,6 +306,7 @@ name = "task-fabric-svn-work"
 version = "0.10.0"
 dependencies = [
  "serde_json",
+ "sha2",
  "task-fabric-svn-work-core",
  "toml",
 ]

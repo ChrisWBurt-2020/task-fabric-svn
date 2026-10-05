@@ -834,6 +834,50 @@ impl TaskLedger {
         Ok(record)
     }
 
+    // ---- task.record_diff_manifest ----
+
+    /// Replace the task's diff manifest ("that diff"): the resolved artifact
+    /// manifest for the workspace-vs-baseline change set. Population is
+    /// supervisor-side (ref sanitization lives there); the ledger validates
+    /// shape and pins it durably: a Note journal
+    /// event summarizing the manifest. State-agnostic: the manifest may be
+    /// recorded while working or while an approval gate is pending.
+    pub fn record_diff_manifest(
+        &self,
+        task_id: &str,
+        manifest: Vec<ArtifactRef>,
+    ) -> Result<TaskRecord, TaskError> {
+        const MAX_MANIFEST_ENTRIES: usize = 10_000;
+        let _lock = self.lock()?;
+        validate_id("task_id", task_id)?;
+        if manifest.len() > MAX_MANIFEST_ENTRIES {
+            return Err(TaskError::Validation(format!(
+                "diff manifest has {} entries; max is {MAX_MANIFEST_ENTRIES}",
+                manifest.len()
+            )));
+        }
+        for entry in &manifest {
+            validate_id("ref_id", &entry.ref_id)?;
+            if let Some(path) = &entry.path {
+                validate_manifest_path(path)?;
+            }
+            if let Some(sha256) = &entry.sha256 {
+                validate_sha256(sha256)?;
+            }
+        }
+        let mut record = self.require(task_id)?;
+        record.diff_manifest = manifest;
+        record.updated_at = crate::now_epoch_seconds();
+        let summary = diff_manifest_summary(&record.diff_manifest);
+        self.append_event(
+            task_id,
+            TaskEventKind::Note,
+            serde_json::json!({ "note": summary }),
+        )?;
+        self.write_snapshot(&record)?;
+        Ok(record)
+    }
+
     /// Worker finished: working -> completed.
     pub fn complete(
         &self,
@@ -1069,6 +1113,72 @@ impl TaskLedger {
         worldstate::atomic_write(&self.snapshot_path(&record.task_id), record)?;
         Ok(())
     }
+}
+/// Path discipline for diff-manifest entries: repo-relative, no dotdot,
+/// no absolute paths, no symlink-escape shapes. Mirrors the strictness of
+/// validate_id without forbidding slash separators.
+pub(crate) fn validate_manifest_path(path: &str) -> Result<(), TaskError> {
+    if path.is_empty() || path.len() > MAX_TEXT {
+        return Err(TaskError::Validation(format!(
+            "manifest path must be 1..={MAX_TEXT} chars"
+        )));
+    }
+    if path.starts_with('/') || path.starts_with('\\') {
+        return Err(TaskError::Validation(
+            "manifest path must be relative, not absolute".into(),
+        ));
+    }
+    if path.contains('\\') {
+        return Err(TaskError::Validation(
+            "manifest path must not contain backslashes".into(),
+        ));
+    }
+    for component in path.split('/') {
+        if component.is_empty() || component == "." || component == ".." {
+            return Err(TaskError::Validation(format!(
+                "manifest path has an unsafe component: '{path}'"
+            )));
+        }
+    }
+    if path.chars().any(|c| c.is_control()) {
+        return Err(TaskError::Validation(
+            "manifest path contains control chars".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_sha256(sha256: &str) -> Result<(), TaskError> {
+    if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(TaskError::Validation(
+            "manifest sha256 must be 64 hex chars".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Bounded one-line summary for the  journal event.
+fn diff_manifest_summary(manifest: &[ArtifactRef]) -> String {
+    let n = manifest.len();
+    if n == 0 {
+        return "diff manifest recorded: 0 artifacts (cleared)".to_string();
+    }
+    const LIST_LIMIT: usize = 50;
+    let mut parts = Vec::new();
+    for entry in manifest.iter().take(LIST_LIMIT) {
+        parts.push(match &entry.path {
+            Some(path) => format!("{} -> {path}", entry.ref_id),
+            None => entry.ref_id.clone(),
+        });
+    }
+    let mut summary = format!("diff manifest recorded: {n} artifact(s): {}", parts.join(", "));
+    if n > LIST_LIMIT {
+        summary.push_str(&format!(" (+{} more)", n - LIST_LIMIT));
+    }
+    if summary.len() > MAX_TEXT {
+        summary.truncate(MAX_TEXT);
+    }
+    summary
 }
 
 pub(crate) fn validate_id(field: &str, value: &str) -> Result<(), TaskError> {
@@ -1757,5 +1867,132 @@ mod tests {
         assert_eq!(conv.len(), 2);
         assert!(ledger.project("task-doesnotexist").expect("project").is_none());
         assert_eq!(b.status, TaskState::Queued);
+    }
+
+    #[test]
+    fn record_diff_manifest_replaces_and_journals_note() {
+        let ledger = test_ledger();
+        let record = ledger.submit(submit_request("conv-manifest")).expect("submit");
+        let record = run_to_working(&ledger, &record.task_id);
+
+        let first = vec![
+            ArtifactRef {
+                ref_id: "art-1".into(),
+                path: Some("src/main.rs".into()),
+                sha256: Some("ab".repeat(32)),
+            },
+            ArtifactRef {
+                ref_id: "art-2".into(),
+                path: Some("README.md".into()),
+                sha256: Some("cd".repeat(32)),
+            },
+        ];
+        let updated = ledger
+            .record_diff_manifest(&record.task_id, first.clone())
+            .expect("record manifest");
+        assert_eq!(updated.diff_manifest, first);
+
+        // Replace wholesale: the second call must not append.
+        let second = vec![ArtifactRef {
+            ref_id: "art-3".into(),
+            path: Some("docs/notes.md".into()),
+            sha256: None,
+        }];
+        let updated = ledger
+            .record_diff_manifest(&record.task_id, second.clone())
+            .expect("replace manifest");
+        assert_eq!(updated.diff_manifest, second);
+
+        // The journal carries a Note event summarizing the manifest.
+        let events = ledger.history(&record.task_id, 100).expect("history");
+        let note = events
+            .iter()
+            .rev()
+            .find(|e| e.kind == TaskEventKind::Note)
+            .expect("Note event");
+        let text = note.payload["note"].as_str().expect("note text");
+        assert!(text.contains("1 artifact"), "unexpected summary: {text}");
+        assert!(text.contains("art-3"), "unexpected summary: {text}");
+
+        // Snapshot round-trip preserves the manifest.
+        let reloaded = ledger
+            .inspect(&record.task_id)
+            .expect("inspect")
+            .expect("exists");
+        assert_eq!(reloaded.diff_manifest, second);
+    }
+
+    #[test]
+    fn record_diff_manifest_rejects_unsafe_paths_and_refs() {
+        let ledger = test_ledger();
+        let record = ledger.submit(submit_request("conv-manifest-bad")).expect("submit");
+        let record = run_to_working(&ledger, &record.task_id);
+
+        let bad = |path: &str| {
+            ledger.record_diff_manifest(
+                &record.task_id,
+                vec![ArtifactRef {
+                    ref_id: "art-1".into(),
+                    path: Some(path.into()),
+                    sha256: None,
+                }],
+            )
+        };
+        assert!(bad("/etc/passwd").is_err(), "absolute path");
+        assert!(bad("../secrets").is_err(), "dotdot path");
+        assert!(bad("a/../../b").is_err(), "embedded dotdot");
+        assert!(bad("a\\b").is_err(), "backslash");
+        assert!(bad("").is_err(), "empty path");
+        assert!(bad("a//b").is_err(), "empty component");
+        assert!(bad("a/./b").is_err(), "dot component");
+
+        let err = ledger
+            .record_diff_manifest(
+                &record.task_id,
+                vec![ArtifactRef {
+                    ref_id: "art/bad".into(),
+                    path: Some("ok.rs".into()),
+                    sha256: None,
+                }],
+            )
+            .unwrap_err();
+        assert!(matches!(err, TaskError::Validation(_)), "bad ref_id: {err}");
+
+        let err = ledger
+            .record_diff_manifest(
+                &record.task_id,
+                vec![ArtifactRef {
+                    ref_id: "art-1".into(),
+                    path: Some("ok.rs".into()),
+                    sha256: Some("not-a-digest".into()),
+                }],
+            )
+            .unwrap_err();
+        assert!(matches!(err, TaskError::Validation(_)), "bad sha256: {err}");
+
+        // A rejected manifest leaves the stored manifest untouched.
+        let reloaded = ledger
+            .inspect(&record.task_id)
+            .expect("inspect")
+            .expect("exists");
+        assert!(reloaded.diff_manifest.is_empty());
+    }
+
+    #[test]
+    fn record_diff_manifest_caps_entry_count() {
+        let ledger = test_ledger();
+        let record = ledger.submit(submit_request("conv-manifest-cap")).expect("submit");
+        let record = run_to_working(&ledger, &record.task_id);
+        let huge: Vec<ArtifactRef> = (0..10_001)
+            .map(|i| ArtifactRef {
+                ref_id: format!("art-{i}"),
+                path: Some(format!("f{i}.rs")),
+                sha256: None,
+            })
+            .collect();
+        let err = ledger
+            .record_diff_manifest(&record.task_id, huge)
+            .unwrap_err();
+        assert!(matches!(err, TaskError::Validation(_)), "cap: {err}");
     }
 }

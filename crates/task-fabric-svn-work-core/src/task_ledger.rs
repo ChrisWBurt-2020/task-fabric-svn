@@ -175,18 +175,98 @@ pub struct TaskRecord {
     /// Server-issued identity for the current approval gate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval_generation: Option<String>,
+    /// Set while `approval_required`: the pending approval envelope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_envelope: Option<ApprovalEnvelope>,
+    /// Every resolved approval envelope, oldest first. The audit trail for
+    /// exactly-once, generation-bound approvals.
+    #[serde(default)]
+    pub resolved_envelopes: Vec<ApprovalEnvelope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_summary: Option<String>,
     #[serde(default)]
     pub artifact_refs: Vec<String>,
     #[serde(default)]
     pub receipt_refs: Vec<String>,
+    /// "That diff": resolved artifact manifest. Empty until the
+    /// supervisor-side population lands (ref sanitization lives there).
+    #[serde(default)]
+    pub diff_manifest: Vec<ArtifactRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
     #[serde(default)]
     pub state_history: Vec<TaskStateTransition>,
+}
+
+/// Channel through which an approval gate was requested or resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalChannel {
+    Typed,
+    Voice,
+    Inbox,
+    System,
+}
+
+impl std::str::FromStr for ApprovalChannel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "typed" => Ok(ApprovalChannel::Typed),
+            "voice" => Ok(ApprovalChannel::Voice),
+            "inbox" => Ok(ApprovalChannel::Inbox),
+            "system" => Ok(ApprovalChannel::System),
+            other => Err(format!(
+                "unknown approval channel '{other}'; expected typed|voice|inbox|system"
+            )),
+        }
+    }
+}
+
+/// Evidence of how the approver reviewed the proposed action before
+/// resolving. Records whether the diff was actually viewed on screen versus
+/// approved from a spoken summary — review quality must never be laundered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewEvidence {
+    pub diff_viewed: bool,
+    pub evidence_channel: ApprovalChannel,
+}
+
+/// One approval gate as a durable, auditable envelope. Minted by
+/// `request_approval`, moved from `pending_envelope` to `resolved_envelopes`
+/// on resolve. The generation binds the envelope exactly-once.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApprovalEnvelope {
+    pub envelope_id: String,
+    pub generation: String,
+    pub action: String,
+    pub requested_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_at: Option<u64>,
+    /// While pending: the channel the gate was requested through. On resolve
+    /// this is overwritten with the resolution channel, which is what
+    /// receipts need ("approval channel per approval").
+    pub channel: ApprovalChannel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_evidence: Option<ReviewEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved: Option<bool>,
+}
+
+/// A resolved artifact reference: the opaque ref id plus where it points.
+/// Population is a follow-up: ref sanitization lives in the supervisor, so
+/// this crate cannot resolve ref ids to paths/digests yet. The type is
+/// stable now so projections can rely on it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArtifactRef {
+    pub ref_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 /// What the submitter provides. `task.submit`.
@@ -382,9 +462,12 @@ impl TaskLedger {
             resume_token: None,
             approval_action: None,
             approval_generation: None,
+            pending_envelope: None,
+            resolved_envelopes: Vec::new(),
             result_summary: None,
             artifact_refs: Vec::new(),
             receipt_refs: Vec::new(),
+            diff_manifest: Vec::new(),
             failure_reason: None,
             created_at: now,
             updated_at: now,
@@ -572,14 +655,34 @@ impl TaskLedger {
     }
 
     /// Worker proposes a gated action: working -> approval_required.
-    pub fn request_approval(&self, task_id: &str, action: &str) -> Result<TaskRecord, TaskError> {
+    /// `channel` is the channel the gate is requested through (the
+    /// worker/orchestrator side); on resolve it is replaced by the
+    /// resolution channel.
+    pub fn request_approval(
+        &self,
+        task_id: &str,
+        action: &str,
+        channel: ApprovalChannel,
+    ) -> Result<TaskRecord, TaskError> {
         let _lock = self.lock()?;
         validate_text("action", action, true)?;
         let mut record = self.require(task_id)?;
         self.transition(&mut record, TaskState::ApprovalRequired, None)?;
-        record.approval_action = Some(action.to_string());
+        let now = crate::now_epoch_seconds();
         let generation = uuid::Uuid::new_v4().simple().to_string();
+        let envelope_id = format!("env-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+        record.approval_action = Some(action.to_string());
         record.approval_generation = Some(generation.clone());
+        record.pending_envelope = Some(ApprovalEnvelope {
+            envelope_id: envelope_id.clone(),
+            generation: generation.clone(),
+            action: action.to_string(),
+            requested_at: now,
+            resolved_at: None,
+            channel,
+            review_evidence: None,
+            approved: None,
+        });
         self.append_event(
             task_id,
             TaskEventKind::ApprovalRequired,
@@ -587,6 +690,7 @@ impl TaskLedger {
                 "action": action,
                 "risk_class": record.risk_class,
                 "approval_generation": generation,
+                "envelope_id": envelope_id,
             }),
         )?;
         self.write_snapshot(&record)?;
@@ -596,28 +700,44 @@ impl TaskLedger {
     // ---- task.approve ----
 
     /// Resolve the approval gate. `approved=true` resumes working;
-    /// `approved=false` cancels the task.
+    /// `approved=false` cancels the task. `channel` is the channel the
+    /// approval arrived through; `review_evidence` records how the approver
+    /// reviewed the action, when known.
     pub fn approve(
         &self,
         task_id: &str,
         approved: bool,
         reason: Option<&str>,
+        channel: ApprovalChannel,
+        review_evidence: Option<ReviewEvidence>,
     ) -> Result<TaskRecord, TaskError> {
         let _lock = self.lock()?;
-        self.approve_locked(task_id, approved, reason, None)
+        self.approve_locked(task_id, approved, reason, None, channel, review_evidence)
     }
 
     /// Resolve only the approval prompt whose generation was presented.
+    /// Retrying an already-resolved generation with the same verdict is
+    /// idempotent (voice double-tap / inbox redelivery must be safe);
+    /// anything else stale is rejected exactly as before.
     pub fn approve_generation(
         &self,
         task_id: &str,
         generation: &str,
         approved: bool,
         reason: Option<&str>,
+        channel: ApprovalChannel,
+        review_evidence: Option<ReviewEvidence>,
     ) -> Result<TaskRecord, TaskError> {
         validate_id("approval_generation", generation)?;
         let _lock = self.lock()?;
-        self.approve_locked(task_id, approved, reason, Some(generation))
+        self.approve_locked(
+            task_id,
+            approved,
+            reason,
+            Some(generation),
+            channel,
+            review_evidence,
+        )
     }
 
     fn approve_locked(
@@ -626,11 +746,26 @@ impl TaskLedger {
         approved: bool,
         reason: Option<&str>,
         generation: Option<&str>,
+        channel: ApprovalChannel,
+        review_evidence: Option<ReviewEvidence>,
     ) -> Result<TaskRecord, TaskError> {
         if let Some(reason) = reason {
             validate_text("reason", reason, false)?;
         }
         let mut record = self.require(task_id)?;
+        // Idempotent retry: the presented generation matches the most
+        // recently resolved envelope with the same verdict, and no gate is
+        // currently pending. Retries change nothing: no journal event, no
+        // snapshot rewrite.
+        if let Some(generation) = generation {
+            if record.status != TaskState::ApprovalRequired {
+                if let Some(last) = record.resolved_envelopes.last() {
+                    if last.generation == generation && last.approved == Some(approved) {
+                        return Ok(record);
+                    }
+                }
+            }
+        }
         if record.status != TaskState::ApprovalRequired {
             return Err(TaskError::InvalidTransition {
                 from: record.status,
@@ -644,6 +779,37 @@ impl TaskLedger {
         if generation.is_some() && record.approval_generation.as_deref() != generation {
             return Err(TaskError::Validation("stale approval generation".into()));
         }
+        // Resolve the pending envelope. Snapshots written before envelopes
+        // existed may be mid-gate with only the legacy fields set; rebuild
+        // the envelope from those so the resolve still journals cleanly.
+        let envelope = record.pending_envelope.take().or_else(|| {
+            record.approval_generation.clone().map(|envelope_generation| {
+                let envelope_id =
+                    format!("env-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+                ApprovalEnvelope {
+                    envelope_id,
+                    generation: envelope_generation,
+                    action: record.approval_action.clone().unwrap_or_default(),
+                    requested_at: record.updated_at,
+                    resolved_at: None,
+                    channel,
+                    review_evidence: None,
+                    approved: None,
+                }
+            })
+        });
+        let mut envelope = match envelope {
+            Some(envelope) => envelope,
+            None => return Err(TaskError::Validation("no pending approval envelope".into())),
+        };
+        envelope.resolved_at = Some(crate::now_epoch_seconds());
+        envelope.channel = channel;
+        envelope.review_evidence = review_evidence;
+        envelope.approved = Some(approved);
+        let envelope_id = envelope.envelope_id.clone();
+        let envelope_generation = envelope.generation.clone();
+        record.resolved_envelopes.push(envelope);
+        record.pending_envelope = None;
         record.approval_action = None;
         record.approval_generation = None;
         let next = if approved {
@@ -655,7 +821,14 @@ impl TaskLedger {
         self.append_event(
             task_id,
             TaskEventKind::ApprovalResolved,
-            serde_json::json!({ "approved": approved, "reason": reason }),
+            serde_json::json!({
+                "approved": approved,
+                "reason": reason,
+                "approval_generation": envelope_generation,
+                "envelope_id": envelope_id,
+                "channel": channel,
+                "review_evidence": review_evidence,
+            }),
         )?;
         self.write_snapshot(&record)?;
         Ok(record)
@@ -898,7 +1071,7 @@ impl TaskLedger {
     }
 }
 
-fn validate_id(field: &str, value: &str) -> Result<(), TaskError> {
+pub(crate) fn validate_id(field: &str, value: &str) -> Result<(), TaskError> {
     if value.is_empty() || value.len() > MAX_ID {
         return Err(TaskError::Validation(format!(
             "{field} must be 1..={MAX_ID} chars"
@@ -1081,22 +1254,22 @@ mod tests {
         let record = run_to_working(&ledger, &record.task_id);
 
         let record = ledger
-            .request_approval(&record.task_id, "commit to main")
+            .request_approval(&record.task_id, "commit to main", ApprovalChannel::Typed)
             .expect("request_approval");
         assert_eq!(record.status, TaskState::ApprovalRequired);
         assert_eq!(record.approval_action.as_deref(), Some("commit to main"));
 
         let record = ledger
-            .approve(&record.task_id, true, Some("looks right"))
+            .approve(&record.task_id, true, Some("looks right"), ApprovalChannel::Typed, None)
             .expect("approve yes");
         assert_eq!(record.status, TaskState::Working);
         assert_eq!(record.approval_action, None);
 
         let record = ledger
-            .request_approval(&record.task_id, "push to origin")
+            .request_approval(&record.task_id, "push to origin", ApprovalChannel::Typed)
             .expect("request_approval 2");
         let record = ledger
-            .approve(&record.task_id, false, Some("not yet"))
+            .approve(&record.task_id, false, Some("not yet"), ApprovalChannel::Typed, None)
             .expect("approve no");
         assert_eq!(record.status, TaskState::Cancelled);
     }
@@ -1107,21 +1280,21 @@ mod tests {
         let record = ledger.submit(submit_request("conv-1")).expect("submit");
         let record = run_to_working(&ledger, &record.task_id);
         let first = ledger
-            .request_approval(&record.task_id, "first action")
+            .request_approval(&record.task_id, "first action", ApprovalChannel::Typed)
             .unwrap();
         let old_generation = first.approval_generation.clone().unwrap();
         ledger
-            .approve_generation(&record.task_id, &old_generation, true, None)
+            .approve_generation(&record.task_id, &old_generation, true, None, ApprovalChannel::Typed, None)
             .unwrap();
         let second = ledger
-            .request_approval(&record.task_id, "second action")
+            .request_approval(&record.task_id, "second action", ApprovalChannel::Typed)
             .unwrap();
         assert_ne!(
             second.approval_generation.as_deref(),
             Some(old_generation.as_str())
         );
         assert!(ledger
-            .approve_generation(&record.task_id, &old_generation, true, None)
+            .approve_generation(&record.task_id, &old_generation, true, None, ApprovalChannel::Typed, None)
             .is_err());
         assert_eq!(
             ledger.inspect(&record.task_id).unwrap().unwrap().status,
@@ -1208,7 +1381,9 @@ mod tests {
         ));
         // Cannot approve outside the approval gate.
         assert!(matches!(
-            ledger.approve(&record.task_id, true, None).unwrap_err(),
+            ledger
+                .approve(&record.task_id, true, None, ApprovalChannel::Typed, None)
+                .unwrap_err(),
             TaskError::InvalidTransition { .. }
         ));
     }
@@ -1266,6 +1441,13 @@ mod tests {
             let ledger = TaskLedger::with_dir(dir.clone());
             let record = ledger.submit(submit_request("conv-9")).expect("submit");
             run_to_working(&ledger, &record.task_id);
+            let requested = ledger
+                .request_approval(&record.task_id, "deploy to staging", ApprovalChannel::Typed)
+                .expect("request_approval");
+            let generation = requested.approval_generation.clone().unwrap();
+            ledger
+                .approve_generation(&record.task_id, &generation, true, None, ApprovalChannel::Typed, None)
+                .expect("approve");
             record.task_id.clone()
         };
         // New ledger instance on the same dir: the task is still there.
@@ -1275,6 +1457,17 @@ mod tests {
         assert_eq!(record.conversation_id, "conv-9");
         let history = ledger.history(&task_id, 10).expect("history");
         assert!(history.len() >= 3);
+        // Envelopes survive the reload.
+        assert_eq!(record.pending_envelope, None);
+        assert_eq!(record.resolved_envelopes.len(), 1);
+        assert_eq!(record.resolved_envelopes[0].approved, Some(true));
+        assert_eq!(record.resolved_envelopes[0].action, "deploy to staging");
+        // ... and the projection resolves from the snapshot alone.
+        let projection = ledger.project(&task_id).expect("project").expect("projection");
+        assert_eq!(projection.task_id, task_id);
+        assert_eq!(projection.state, TaskState::Working);
+        assert_eq!(projection.conversation_id, "conv-9");
+        assert!(projection.pending_approval.is_none());
     }
 
     #[test]
@@ -1371,5 +1564,198 @@ mod tests {
             assert!(terminal.is_terminal());
         }
         assert!(!Queued.is_terminal());
+    }
+
+    #[test]
+    fn duplicate_approval_resolution_is_idempotent() {
+        let ledger = test_ledger();
+        let record = ledger.submit(submit_request("conv-1")).expect("submit");
+        let record = run_to_working(&ledger, &record.task_id);
+        let requested = ledger
+            .request_approval(&record.task_id, "commit to main", ApprovalChannel::Typed)
+            .expect("request_approval");
+        let generation = requested.approval_generation.clone().unwrap();
+        let envelope_id = requested.pending_envelope.clone().unwrap().envelope_id;
+
+        let evidence = ReviewEvidence {
+            diff_viewed: false,
+            evidence_channel: ApprovalChannel::Voice,
+        };
+        let resolved = ledger
+            .approve_generation(
+                &record.task_id,
+                &generation,
+                true,
+                Some("looks right"),
+                ApprovalChannel::Voice,
+                Some(evidence),
+            )
+            .expect("approve");
+        assert_eq!(resolved.status, TaskState::Working);
+        assert_eq!(resolved.pending_envelope, None);
+        assert_eq!(resolved.resolved_envelopes.len(), 1);
+        let env = &resolved.resolved_envelopes[0];
+        assert_eq!(env.envelope_id, envelope_id);
+        assert_eq!(env.generation, generation);
+        assert_eq!(env.approved, Some(true));
+        assert_eq!(env.channel, ApprovalChannel::Voice);
+        assert_eq!(env.review_evidence, Some(evidence));
+        assert!(env.resolved_at.is_some());
+        let journal_len = ledger.history(&record.task_id, 100).expect("history").len();
+
+        // Retry of the same generation + verdict: Ok, nothing duplicated.
+        let retried = ledger
+            .approve_generation(&record.task_id, &generation, true, None, ApprovalChannel::Voice, None)
+            .expect("idempotent retry");
+        assert_eq!(retried.status, TaskState::Working);
+        assert_eq!(retried.resolved_envelopes.len(), 1);
+        assert_eq!(
+            ledger.history(&record.task_id, 100).expect("history").len(),
+            journal_len,
+            "idempotent retry must not journal a second resolution"
+        );
+
+        // Same generation, different verdict: still rejected.
+        assert!(ledger
+            .approve_generation(&record.task_id, &generation, false, None, ApprovalChannel::Typed, None)
+            .is_err());
+        // Unknown generation after resolve: still rejected.
+        assert!(ledger
+            .approve_generation(&record.task_id, "not-a-real-generation", true, None, ApprovalChannel::Typed, None)
+            .is_err());
+    }
+
+    #[test]
+    fn approval_resolved_journal_carries_generation_and_envelope() {
+        let ledger = test_ledger();
+        let record = ledger.submit(submit_request("conv-1")).expect("submit");
+        let record = run_to_working(&ledger, &record.task_id);
+        let requested = ledger
+            .request_approval(&record.task_id, "push to origin", ApprovalChannel::Inbox)
+            .expect("request_approval");
+        let generation = requested.approval_generation.clone().unwrap();
+        let envelope_id = requested.pending_envelope.as_ref().unwrap().envelope_id.clone();
+        ledger
+            .approve_generation(&record.task_id, &generation, true, None, ApprovalChannel::Inbox, None)
+            .expect("approve");
+        let history = ledger.history(&record.task_id, 10).expect("history");
+        let resolved = history
+            .iter()
+            .find(|e| e.kind == TaskEventKind::ApprovalResolved)
+            .expect("ApprovalResolved event");
+        assert_eq!(resolved.payload["approval_generation"], serde_json::json!(generation));
+        assert_eq!(resolved.payload["envelope_id"], serde_json::json!(envelope_id));
+        assert_eq!(resolved.payload["channel"], serde_json::json!("inbox"));
+    }
+
+    #[test]
+    fn old_snapshots_without_envelopes_still_load_and_resolve() {
+        let ledger = test_ledger();
+        let record = ledger.submit(submit_request("conv-legacy")).expect("submit");
+        let record = run_to_working(&ledger, &record.task_id);
+        // Simulate a pre-envelope snapshot: strip the new fields, then fake
+        // the mid-gate state an old daemon would have written.
+        let mut value = serde_json::to_value(&record).expect("to_value");
+        let obj = value.as_object_mut().expect("object");
+        obj.remove("pending_envelope");
+        obj.remove("resolved_envelopes");
+        obj.remove("diff_manifest");
+        obj.insert("status".into(), serde_json::json!("approval_required"));
+        obj.insert("approval_action".into(), serde_json::json!("legacy action"));
+        obj.insert("approval_generation".into(), serde_json::json!("legacy-gen-1"));
+        let path = ledger.dir.join("tasks").join(format!("{}.json", record.task_id));
+        fs::write(&path, serde_json::to_vec(&value).expect("json")).expect("write");
+
+        let loaded = ledger.inspect(&record.task_id).expect("inspect").expect("exists");
+        assert_eq!(loaded.pending_envelope, None);
+        assert!(loaded.resolved_envelopes.is_empty());
+        assert!(loaded.diff_manifest.is_empty());
+
+        // The legacy gate still resolves; the envelope is rebuilt at resolve.
+        let resolved = ledger
+            .approve_generation(&record.task_id, "legacy-gen-1", true, None, ApprovalChannel::System, None)
+            .expect("legacy resolve");
+        assert_eq!(resolved.status, TaskState::Working);
+        assert_eq!(resolved.resolved_envelopes.len(), 1);
+        assert_eq!(resolved.resolved_envelopes[0].generation, "legacy-gen-1");
+        assert_eq!(resolved.resolved_envelopes[0].action, "legacy action");
+    }
+
+    #[test]
+    fn serialized_records_carry_no_transcript_shaped_data() {
+        let ledger = test_ledger();
+        let record = ledger.submit(submit_request("conv-1")).expect("submit");
+        let record = run_to_working(&ledger, &record.task_id);
+        let requested = ledger
+            .request_approval(&record.task_id, "commit", ApprovalChannel::Voice)
+            .expect("request_approval");
+        let generation = requested.approval_generation.clone().unwrap();
+        let record = ledger
+            .approve_generation(
+                &record.task_id,
+                &generation,
+                true,
+                None,
+                ApprovalChannel::Voice,
+                Some(ReviewEvidence {
+                    diff_viewed: true,
+                    evidence_channel: ApprovalChannel::Typed,
+                }),
+            )
+            .expect("approve");
+        let value = serde_json::to_value(&record).expect("to_value");
+        fn collect_keys(v: &serde_json::Value, keys: &mut Vec<String>) {
+            match v {
+                serde_json::Value::Object(map) => {
+                    for (k, val) in map {
+                        keys.push(k.clone());
+                        collect_keys(val, keys);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for item in items {
+                        collect_keys(item, keys);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut keys = Vec::new();
+        collect_keys(&value, &mut keys);
+        assert!(
+            !keys.iter().any(|k| k.to_lowercase().contains("transcript")),
+            "transcript-shaped field in record: {keys:?}"
+        );
+    }
+
+    #[test]
+    fn projections_resolve_task_and_conversation_without_replay() {
+        use crate::projections::TaskProjection;
+        let ledger = test_ledger();
+        let a = ledger.submit(submit_request("conv-p")).expect("submit a");
+        let b = ledger.submit(submit_request("conv-p")).expect("submit b");
+        run_to_working(&ledger, &a.task_id);
+        let requested = ledger
+            .request_approval(&a.task_id, "merge it", ApprovalChannel::Inbox)
+            .expect("request_approval");
+        let envelope = requested.pending_envelope.clone().unwrap();
+
+        let proj = TaskProjection::from_record(&ledger.inspect(&a.task_id).unwrap().unwrap());
+        assert_eq!(proj.task_id, a.task_id);
+        assert_eq!(proj.state, TaskState::ApprovalRequired);
+        assert_eq!(proj.intent_summary, "Summarize the latest draft.");
+        let pending = proj.pending_approval.as_ref().expect("pending approval");
+        assert_eq!(pending.envelope_id, envelope.envelope_id);
+        assert_eq!(pending.generation, envelope.generation);
+        assert_eq!(pending.action, "merge it");
+        assert_eq!(pending.channel, ApprovalChannel::Inbox);
+        assert!(proj.pending_input.is_none());
+
+        let by_id = ledger.project(&a.task_id).expect("project").expect("some");
+        assert_eq!(by_id, proj);
+        let conv = ledger.project_by_conversation("conv-p").expect("by conversation");
+        assert_eq!(conv.len(), 2);
+        assert!(ledger.project("task-doesnotexist").expect("project").is_none());
+        assert_eq!(b.status, TaskState::Queued);
     }
 }

@@ -15,8 +15,8 @@
 //! task-fabric-svn-work task note-progress <task-id> --note "..."
 //! task-fabric-svn-work task request-input <task-id> --question "..." --resume-token T
 //! task-fabric-svn-work task respond <task-id> --resume-token T --answer "..."
-//! task-fabric-svn-work task request-approval <task-id> --action "..."
-//! task-fabric-svn-work task approve <task-id> --approved true|false [--reason R]
+//! task-fabric-svn-work task request-approval <task-id> --action "..." [--channel typed|voice|inbox|system]
+//! task-fabric-svn-work task approve <task-id> --approved true|false [--reason R] [--channel C] [--diff-viewed true|false]
 //! task-fabric-svn-work task complete <task-id> --result-summary "..." \
 //!     [--artifact-ref A ...] [--receipt-ref R ...]
 //! task-fabric-svn-work task fail <task-id> --reason R
@@ -28,7 +28,8 @@
 //! runs here — workers attach in step 4.
 
 use task_fabric_svn_work_core::task_ledger::{
-    RiskClass, TaskError, TaskLedger, TaskListFilter, TaskState, TaskSubmitRequest,
+    ApprovalChannel, ReviewEvidence, RiskClass, TaskError, TaskLedger, TaskListFilter, TaskState,
+    TaskSubmitRequest,
 };
 use std::collections::HashMap;
 
@@ -314,8 +315,21 @@ fn request_approval_cmd(
 ) -> Result<serde_json::Value, String> {
     let task_id = positional(args, 0, "task id")?;
     let flags = parse_flags(&args[1..])?;
-    let record = task_result(ledger.request_approval(task_id, required(&flags, "action")?))?;
+    let channel = parse_channel(optional(&flags, "channel"))?;
+    let record = task_result(ledger.request_approval(
+        task_id,
+        required(&flags, "action")?,
+        channel,
+    ))?;
     Ok(ok_task(&record))
+}
+
+/// Approval channel for request/approve commands. Defaults to `typed`.
+fn parse_channel(flag: Option<&str>) -> Result<ApprovalChannel, String> {
+    match flag {
+        None => Ok(ApprovalChannel::Typed),
+        Some(s) => s.parse::<ApprovalChannel>(),
+    }
 }
 
 fn approve_cmd(ledger: &TaskLedger, args: &[String]) -> Result<serde_json::Value, String> {
@@ -327,9 +341,26 @@ fn approve_cmd(ledger: &TaskLedger, args: &[String]) -> Result<serde_json::Value
         other => return Err(format!("--approved must be true|false, got '{other}'")),
     };
     let reason = optional(&flags, "reason");
+    let channel = parse_channel(optional(&flags, "channel"))?;
+    let review_evidence = match optional(&flags, "diff-viewed") {
+        Some(value) => {
+            let diff_viewed = match value {
+                "true" => true,
+                "false" => false,
+                other => return Err(format!("--diff-viewed must be true|false, got [{other}]")),
+            };
+            Some(ReviewEvidence {
+                diff_viewed,
+                evidence_channel: channel,
+            })
+        }
+        None => None,
+    };
     let result = match optional(&flags, "generation") {
-        Some(generation) => ledger.approve_generation(task_id, generation, approved, reason),
-        None => ledger.approve(task_id, approved, reason),
+        Some(generation) => {
+            ledger.approve_generation(task_id, generation, approved, reason, channel, review_evidence)
+        }
+        None => ledger.approve(task_id, approved, reason, channel, review_evidence),
     };
     let record = task_result(result)?;
     Ok(ok_task(&record))

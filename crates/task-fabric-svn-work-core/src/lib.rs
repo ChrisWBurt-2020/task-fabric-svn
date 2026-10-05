@@ -21,6 +21,7 @@ pub mod experiment;
 pub mod improvement;
 pub mod horizon;
 pub mod notification_audio;
+pub mod projections;
 pub mod task_ledger;
 pub mod world_miner;
 pub mod worldstate;

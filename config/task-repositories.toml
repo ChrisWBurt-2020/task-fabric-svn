@@ -20,3 +20,7 @@ version = 1
 # [repositories.example-project]
 # path = "/home/user/Work/example-project"
 # fingerprint = "https://github.com/YOUR-USER/example-project.git"
+
+[repositories.heron-field]
+path = "/home/chris/Work/HeronField"
+fingerprint = "https://github.com/ChrisWBurt-2020/heron-field.git"

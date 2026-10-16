@@ -165,15 +165,15 @@ class ProxyTest(unittest.TestCase):
     def test_spoofed_consumer_header_is_replaced(self):
         status, _ = self._post(
             {"model": "qwen/qwen3.8-27b:free", "messages": []},
-            headers={"X-Task-Fabric-Svn-Consumer": "homenode-voice",
-                     "X-Task-Fabric-Svn-Trace-Id": "spoofed",
+            headers={"X-Heron-Consumer": "homenode-voice",
+                     "X-Heron-Trace-Id": "spoofed",
                      "Authorization": "Bearer worker-supplied"})
         self.assertTrue(status.endswith(b"200 OK"), status)
         self.assertEqual(len(self.upstream.requests), 1)
         seen = self.upstream.requests[0]["headers"]
-        self.assertEqual(seen.get("x-task-fabric-svn-consumer"), "task-fabric-svn-harness-opencode")
-        self.assertEqual(seen.get("x-task-fabric-svn-trace-id"), "trace-1")
-        self.assertEqual(seen.get("x-task-fabric-svn-work-id"), "task-test1")
+        self.assertEqual(seen.get("x-heron-consumer"), "task-fabric-svn-harness-opencode")
+        self.assertEqual(seen.get("x-heron-trace-id"), "trace-1")
+        self.assertEqual(seen.get("x-heron-work-id"), "task-test1")
         # The sandbox's spoofed key must never reach upstream; the proxy
         # injects the owner-provisioned 9router client key instead.
         self.assertEqual(seen.get("authorization"), "Bearer " + ROUTER_KEY)
@@ -196,7 +196,7 @@ class ProxyTest(unittest.TestCase):
     def test_attestation_is_valid(self):
         self._post({"model": "qwen/qwen3.8-27b:free", "messages": []})
         seen = self.upstream.requests[0]["headers"]
-        att = seen.get("x-task-fabric-svn-consumer-attestation")
+        att = seen.get("x-heron-consumer-attestation")
         self.assertIsNotNone(att)
         ver, ts, mac = att.split(",")
         self.assertEqual(ver, "v1")

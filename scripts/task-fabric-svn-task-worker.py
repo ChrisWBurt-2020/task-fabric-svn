@@ -216,7 +216,8 @@ CODEMODE_PROMPT_SECTION = (
     "tokens of one batched run. When refining (trying another pattern, widening "
     "a filter), edit and RE-RUN the script — do not fall back to new one-off "
     "tool calls. The sandbox is read-only (no network, no env, no subprocess, "
-    "20s cap, 64KB output); writes still go through your normal edit flow."
+    "20s cap, 64KB output) — use only local Deno APIs, never `https://` imports; "
+    "writes still go through your normal edit flow."
 )
 
 

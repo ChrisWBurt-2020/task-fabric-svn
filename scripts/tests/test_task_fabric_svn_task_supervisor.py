@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -685,6 +686,43 @@ class HarnessResolutionTests(SupervisorTestBase):
         resolved = sup._harness_fn()
         self.assertTrue(resolved)
         self.assertNotIn("/shims/", resolved)
+
+
+class CodemodeResolutionTests(unittest.TestCase):
+    def test_resolves_owner_controlled_path_first(self):
+        with tempfile.TemporaryDirectory() as home:
+            exe = Path(home) / ".local" / "bin" / "codemode"
+            exe.parent.mkdir(parents=True)
+            exe.touch()
+            exe.chmod(0o755)
+            with unittest.mock.patch.object(_mod.Path, "home", return_value=Path(home)):
+                self.assertEqual(_mod._resolve_codemode("/usr/bin/opencode"), str(exe))
+
+    def test_falls_back_to_harness_sibling(self):
+        with tempfile.TemporaryDirectory() as home:
+            with tempfile.TemporaryDirectory() as bindir:
+                exe = Path(bindir) / "codemode"
+                exe.touch()
+                exe.chmod(0o755)
+                with unittest.mock.patch.object(_mod.Path, "home", return_value=Path(home)):
+                    self.assertEqual(
+                        _mod._resolve_codemode(str(Path(bindir) / "opencode")),
+                        str(exe))
+
+    def test_returns_none_when_absent(self):
+        with tempfile.TemporaryDirectory() as home:
+            with unittest.mock.patch.object(_mod.Path, "home", return_value=Path(home)):
+                self.assertIsNone(_mod._resolve_codemode("/usr/bin/opencode"))
+                self.assertIsNone(_mod._resolve_codemode(None))
+
+    def test_ignores_non_executable(self):
+        with tempfile.TemporaryDirectory() as home:
+            exe = Path(home) / ".local" / "bin" / "codemode"
+            exe.parent.mkdir(parents=True)
+            exe.touch()
+            exe.chmod(0o644)
+            with unittest.mock.patch.object(_mod.Path, "home", return_value=Path(home)):
+                self.assertIsNone(_mod._resolve_codemode("/usr/bin/opencode"))
 
 
 if __name__ == "__main__":

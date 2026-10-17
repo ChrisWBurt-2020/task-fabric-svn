@@ -260,6 +260,38 @@ class BuildPromptTests(unittest.TestCase):
         self.assertIn('"a": 1', prompt)
         self.assertNotIn('"a": 2', prompt)
 
+    def test_codemode_section_absent_by_default(self):
+        task = {"task_id": "task-abc", "intent_summary": "do the thing", "parameters": {}}
+        prompt = worker.build_prompt(task, None, resumed=False)
+        self.assertNotIn("/opt/task_fabric_svn/codemode", prompt)
+
+    def test_codemode_section_present_when_enabled(self):
+        task = {"task_id": "task-abc", "intent_summary": "do the thing", "parameters": {}}
+        for resumed in (False, True):
+            prompt = worker.build_prompt(task, None, resumed=resumed, codemode=True)
+            self.assertIn("/opt/task_fabric_svn/codemode", prompt)
+            self.assertIn("read-only", prompt)
+
+    def test_codemode_section_does_not_disturb_markers(self):
+        task = {"task_id": "task-abc", "intent_summary": "do the thing", "parameters": {}}
+        prompt = worker.build_prompt(task, None, resumed=False, codemode=True)
+        self.assertIn("TASK_FABRIC_SVN_QUESTION", prompt)
+        self.assertIn("TASK_FABRIC_SVN_APPROVAL", prompt)
+        self.assertIn("TASK_FABRIC_SVN_DONE", prompt)
+
+
+class CodemodeAvailabilityTests(unittest.TestCase):
+    def test_available_when_wrapper_path_exists(self):
+        with tempfile.NamedTemporaryFile(suffix="codemode") as f:
+            self.assertTrue(worker.codemode_available(f.name))
+
+    def test_unavailable_when_path_missing(self):
+        self.assertFalse(worker.codemode_available("/tmp/codemode-does-not-exist-12345"))
+
+    def test_unavailable_on_none_or_empty(self):
+        self.assertFalse(worker.codemode_available(None))
+        self.assertFalse(worker.codemode_available(""))
+
     def test_resumed_prompt_carries_answer_and_markers(self):
         task = {"task_id": "task-abc", "intent_summary": "i", "parameters": {}}
         prompt = worker.build_prompt(task, "yes, do it", resumed=True)

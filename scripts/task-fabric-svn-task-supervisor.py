@@ -558,6 +558,25 @@ class SupervisorConfig:
     supervisor_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
 
 
+def _resolve_codemode(harness: str | None) -> str | None:
+    """Locate the codemode wrapper (experimental batched inspection).
+
+    Owner-controlled ~/.local/bin/codemode first, then next to the harness
+    binary. Returns None when absent — the worker and containment degrade
+    gracefully, so codemode is purely additive.
+    """
+    candidates = [Path.home() / ".local" / "bin" / "codemode"]
+    if harness:
+        try:
+            candidates.append(Path(harness).parent / "codemode")
+        except (OSError, ValueError):
+            pass
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
 def _default_harness() -> str | None:
     """Resolve the opencode executable to its real binary, not the mise shim.
 
@@ -747,12 +766,16 @@ class Supervisor:
             raise ContainmentPrepError(
                 "harness executable 'opencode' not found on PATH",
                 permanent=True)
+        codemode = _resolve_codemode(harness)
+        if codemode:
+            log(f"task {task_id}: codemode available at {codemode}")
         try:
             manifest = generate_manifest(
                 task_id, trace_id, model,
                 manifest_dir=self.cfg.manifest_dir,
                 socket_dir=self.cfg.socket_dir,
-                harness_executable=harness)
+                harness_executable=harness,
+                codemode_executable=codemode)
         except ManifestError as e:
             raise ContainmentPrepError(f"manifest_unavailable: {e}",
                                        permanent=True) from e

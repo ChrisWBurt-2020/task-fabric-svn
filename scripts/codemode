@@ -1,0 +1,71 @@
+#!/bin/sh
+# codemode — batched tool scripting for Task Fabric workers (experimental).
+#
+# The agent writes a short JavaScript program that does its own
+# coordination (find files, read them, filter, synthesize) and prints
+# JSON. This wrapper runs it under Deno with a deny-by-default
+# permission set, so one sandbox execution replaces N sequential
+# single-turn tool calls and their repeated context re-sends.
+#
+# Security posture (v1, read-only):
+#   --allow-read=/workspace,/tmp   script reads the contained snapshot
+#   no --allow-net, --allow-env, --allow-run, --allow-write
+# Writes still go through the harness's normal edit flow.
+#
+# Limits: script <= 32KB, wall clock <= 20s, stdout <= 64KB.
+# Exit codes: 0 ok; 2 usage/validation; 124 timeout; else deno's.
+
+set -u
+
+DENO_BIN="${CODEMODE_DENO_BIN:-/usr/bin/deno}"
+MAX_SCRIPT_BYTES=32768
+TIMEOUT_SECS=20
+MAX_OUT_BYTES=65536
+
+die() { echo "codemode: $1" >&2; exit "${2:-2}"; }
+
+[ $# -eq 1 ] || die "usage: codemode /tmp/<name>.js" 2
+SCRIPT="$1"
+
+# --- validation (no execution yet) ---
+case "$SCRIPT" in
+  /tmp/*.js|/workspace/*.js) ;;
+  *) die "refusing script outside /tmp or /workspace: $SCRIPT" 2 ;;
+esac
+case "$SCRIPT" in
+  *..*) die "refusing path containing '..': $SCRIPT" 2 ;;
+esac
+[ -f "$SCRIPT" ] || die "script not found: $SCRIPT" 2
+[ -r "$SCRIPT" ] || die "script not readable: $SCRIPT" 2
+SIZE=$(wc -c < "$SCRIPT" 2>/dev/null | tr -d ' ') || die "cannot stat script" 2
+case "$SIZE" in ''|*[!0-9]*) die "cannot stat script" 2 ;; esac
+[ "$SIZE" -le "$MAX_SCRIPT_BYTES" ] || die "script too large (${SIZE} > ${MAX_SCRIPT_BYTES} bytes)" 2
+[ "$SIZE" -gt 0 ] || die "script is empty" 2
+
+[ -x "$DENO_BIN" ] || die "deno not executable at $DENO_BIN" 2
+command -v timeout >/dev/null 2>&1 || die "timeout(1) not found" 2
+
+# --- execution: deny-by-default, read-only, capped ---
+# Deno defaults to no permissions; we grant read on the two trees only.
+# Output goes to a temp file first so we can report deno's real exit code
+# (a pipe would mask it) and then enforce the byte cap.
+OUT=$(mktemp /tmp/codemode-out-XXXXXX) || die "cannot create temp output" 2
+ERR=$(mktemp /tmp/codemode-err-XXXXXX) || { rm -f "$OUT"; die "cannot create temp output" 2; }
+# shellcheck disable=SC2064
+trap "rm -f '$OUT' '$ERR'" EXIT INT TERM
+
+timeout "$TIMEOUT_SECS" "$DENO_BIN" run \
+  --allow-read=/workspace,/tmp \
+  "$SCRIPT" >"$OUT" 2>"$ERR"
+rc=$?
+
+if [ "$rc" -eq 124 ]; then
+  echo "codemode: script exceeded ${TIMEOUT_SECS}s wall clock" >&2
+  exit 124
+fi
+if [ "$rc" -ne 0 ]; then
+  head -c 2000 "$ERR" >&2
+  exit "$rc"
+fi
+head -c "$MAX_OUT_BYTES" "$OUT"
+exit 0

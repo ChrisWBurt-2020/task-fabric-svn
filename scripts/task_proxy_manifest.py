@@ -90,8 +90,14 @@ def build_manifest(task_id: str, trace_id: str, model: str, *,
                    consumer: str = DEFAULT_CONSUMER,
                    destination: str = DESTINATION,
                    max_request_bytes: int = MAX_REQUEST_BYTES,
-                   max_requests: int = MAX_REQUESTS) -> dict:
-    """Build (but do not write) the manifest document load_config accepts."""
+                   max_requests: int = MAX_REQUESTS,
+                   codemode_executable: str | None = None) -> dict:
+    """Build (but do not write) the manifest document load_config accepts.
+
+    codemode_executable is optional: when set, the worker advertises the
+    experimental batched-inspection tool and containment bind-mounts it.
+    When absent, both degrade gracefully (no prompt section, no bind).
+    """
     validate_task_id(task_id)
     if not trace_id or not isinstance(trace_id, str):
         raise ManifestError("manifest requires a non-empty trace_id")
@@ -99,7 +105,7 @@ def build_manifest(task_id: str, trace_id: str, model: str, *,
         raise ManifestError("manifest requires a non-empty model")
     if not consumer or not isinstance(consumer, str):
         raise ManifestError("manifest requires a non-empty consumer")
-    return {
+    document = {
         "schema": MANIFEST_SCHEMA,
         "harness_executable": harness_executable,
         "proxy_socket": proxy_socket,
@@ -113,6 +119,9 @@ def build_manifest(task_id: str, trace_id: str, model: str, *,
             "max_requests": max_requests,
         },
     }
+    if codemode_executable:
+        document["codemode_executable"] = codemode_executable
+    return document
 
 
 def generate_manifest(task_id: str, trace_id: str, model: str, *,
@@ -121,7 +130,8 @@ def generate_manifest(task_id: str, trace_id: str, model: str, *,
                       consumer: str = DEFAULT_CONSUMER,
                       destination: str = DESTINATION,
                       max_request_bytes: int = MAX_REQUEST_BYTES,
-                      max_requests: int = MAX_REQUESTS) -> Path:
+                      max_requests: int = MAX_REQUESTS,
+                      codemode_executable: str | None = None) -> Path:
     """Write the per-task manifest atomically (tmp + rename, mode 0600) and
     return its path.
 
@@ -139,6 +149,7 @@ def generate_manifest(task_id: str, trace_id: str, model: str, *,
         proxy_socket=str(socket_path),
         consumer=consumer, destination=destination,
         max_request_bytes=max_request_bytes, max_requests=max_requests,
+        codemode_executable=codemode_executable,
     )
     encoded = (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
     if manifest_path.is_file():

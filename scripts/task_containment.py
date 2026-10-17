@@ -36,7 +36,9 @@ def load_config(path, task_id, trace_id, model):
         raise ContainmentError("containment_config_required: no unrestricted worker fallback")
     try:
         config = json.loads(trusted_file(path).read_text())
-        if set(config) != {"schema", "harness_executable", "proxy_socket", "contract"} or config["schema"] != 1:
+        required = {"schema", "harness_executable", "proxy_socket", "contract"}
+        optional = {"codemode_executable"}
+        if not required <= set(config) <= required | optional or config["schema"] != 1:
             raise ValueError("invalid config")
         contract = config["contract"]
         if set(contract) != {"task_id", "trace_id", "model", "consumer", "destination", "max_request_bytes", "max_requests"}:
@@ -54,6 +56,11 @@ def load_config(path, task_id, trace_id, model):
         if not binary.is_absolute() or not binary.is_file() or not os.access(binary, os.X_OK):
             raise ValueError("missing explicit harness executable")
         config["harness_executable"] = str(binary.resolve())
+        if config.get("codemode_executable"):
+            ce = Path(config["codemode_executable"])
+            if not ce.is_absolute() or not ce.is_file() or not os.access(ce, os.X_OK):
+                raise ValueError("invalid codemode executable")
+            config["codemode_executable"] = str(ce.resolve())
         proxy = Path(config["proxy_socket"])
         info = proxy.lstat()
         if not proxy.is_absolute() or not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
@@ -477,6 +484,13 @@ class TaskContainment:
             args += ["--dir", "/opt/task_fabric_svn",
                      "--ro-bind", self.config["harness_executable"], "/opt/task_fabric_svn/opencode",
                      "--ro-bind", self.config["proxy_socket"], "/run/task_fabric_svn/inference.sock"]
+            # Codemode (experimental): bind the wrapper read-only when the
+            # manifest carries it. load_config validated the path; absent
+            # means an older supervisor generated the manifest, and the
+            # worker's prompt degrades gracefully (see codemode_available).
+            codemode_src = self.config.get("codemode_executable")
+            if codemode_src:
+                args += ["--ro-bind", codemode_src, "/opt/task_fabric_svn/codemode"]
             # Literal script; no prompt, path or model is interpolated into shell.
             args += ["--", "/bin/sh", "-c",
                      "socat TCP-LISTEN:19876,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/task_fabric_svn/inference.sock &\n"

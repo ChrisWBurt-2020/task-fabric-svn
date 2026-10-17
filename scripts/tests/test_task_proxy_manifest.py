@@ -81,11 +81,12 @@ class ManifestGeneratorTests(unittest.TestCase):
         self.manifest_dir = self.tmpdir / "manifests"
         self.socket_dir = self.tmpdir / "sockets"
 
-    def _gen(self, task_id="task-m1", trace_id="trace-m1", model=DEFAULT_MODEL):
+    def _gen(self, task_id="task-m1", trace_id="trace-m1", model=DEFAULT_MODEL,
+             **kwargs):
         return generate_manifest(
             task_id, trace_id, model,
             manifest_dir=self.manifest_dir, socket_dir=self.socket_dir,
-            harness_executable=sys.executable)
+            harness_executable=sys.executable, **kwargs)
 
     def test_manifest_paths_deterministic_and_nested_inside_dirs(self):
         manifest, sock = manifest_paths("task-m1", self.manifest_dir,
@@ -147,6 +148,24 @@ class ManifestGeneratorTests(unittest.TestCase):
         self.assertEqual(doc["contract"]["consumer"], DEFAULT_CONSUMER)
         self.assertEqual(doc["contract"]["destination"], DESTINATION)
         self.assertEqual(doc["contract"]["model"], "some-model")
+
+    def test_build_manifest_omits_codemode_by_default(self):
+        doc = build_manifest("task-m9", "trace-9", "some-model",
+                             harness_executable="/bin/true",
+                             proxy_socket="/tmp/x.socket")
+        self.assertNotIn("codemode_executable", doc)
+
+    def test_build_manifest_includes_codemode_when_given(self):
+        doc = build_manifest("task-m9", "trace-9", "some-model",
+                             harness_executable="/bin/true",
+                             proxy_socket="/tmp/x.socket",
+                             codemode_executable="/home/u/.local/bin/codemode")
+        self.assertEqual(doc["codemode_executable"], "/home/u/.local/bin/codemode")
+
+    def test_generate_roundtrips_codemode_key(self):
+        path = self._gen(codemode_executable=sys.executable)
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(doc["codemode_executable"], sys.executable)
 
 
 class ProxyReadyTests(unittest.TestCase):

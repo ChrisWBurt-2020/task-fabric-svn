@@ -198,8 +198,41 @@ def artifact_refs_for(repo_dir: Path) -> list[str]:
     return [sanitize_artifact_ref(f) for f in changed_files(repo_dir)]
 
 
+# Codemode (experimental): one sandboxed JS execution replaces N sequential
+# read-only tool calls. The wrapper path arrives via the manifest's optional
+# codemode_executable key (resolved by the supervisor to an owner-controlled
+# location); the worker only advertises it when present, so older
+# supervisors/manifests degrade gracefully to the prompt without this section.
+CODEMODE_PROMPT_SECTION = (
+    "\nBatched inspection (codemode, experimental): when you need 3+ consecutive "
+    "read-only workspace inspections (find files, read several files, filter), "
+    "write ONE short JavaScript program to /tmp/codemode-<name>.js that does the "
+    "coordination itself with Deno.readDir/Deno.readTextFile over /workspace and "
+    "prints a single JSON synthesis to stdout, then run "
+    "`/opt/task_fabric_svn/codemode /tmp/codemode-<name>.js` via bash. "
+    "One execution, one roundtrip — do not fan out the same reads as separate "
+    "tool calls. The sandbox is read-only (no network, no env, no subprocess, "
+    "20s cap); writes still go through your normal edit flow."
+)
+
+
+def codemode_available(codemode_executable: str | None) -> bool:
+    """True when the manifest carries a codemode wrapper path.
+
+    load_config already validated it (absolute, file, executable); this is
+    a belt-and-braces presence check so the prompt never advertises a tool
+    that containment won't bind.
+    """
+    if not codemode_executable:
+        return False
+    try:
+        return Path(codemode_executable).is_file()
+    except (OSError, ValueError):
+        return False
+
+
 def build_prompt(task: dict, answer: str | None, resumed: bool,
-                 resume_kind: str = "question") -> str:
+                 resume_kind: str = "question", codemode: bool = False) -> str:
     tid = task.get("task_id", "?")
     intent = task.get("intent_summary", "")
     # Task records serialize this field as `parameters`; accept the old
@@ -207,6 +240,7 @@ def build_prompt(task: dict, answer: str | None, resumed: bool,
     params = task.get("parameters")
     if params is None:
         params = task.get("typed_parameters", {})
+    extra = CODEMODE_PROMPT_SECTION if codemode else ""
     if resumed:
         lead = answer if resume_kind == "approval" else f"The human answered your question: {answer}"
         return (
@@ -219,6 +253,7 @@ def build_prompt(task: dict, answer: str | None, resumed: bool,
             "and nothing after it. When the work is fully done, end with exactly:\n"
             f"{DONE_MARKER} <one-paragraph result summary>\n"
             "and nothing after it."
+            f"{extra}"
         )
     return (
         f"You are executing Task Fabric SVN task {tid}: {intent}\n"
@@ -234,6 +269,7 @@ def build_prompt(task: dict, answer: str | None, resumed: bool,
         f"{DONE_MARKER} <one-paragraph result summary>\n"
         "and nothing after it.\n"
         "Do not print any marker unless you mean it."
+        f"{extra}"
     )
 
 
@@ -621,6 +657,12 @@ def main() -> int:
     # --- work loop ---
     # opencode_session/answer may already be set by --resume (adopted session,
     # or an answer that arrived while the worker was down).
+    # Codemode is advertised only when the manifest carries the wrapper path;
+    # older supervisors generate manifests without it and get the prompt
+    # without the section.
+    use_codemode = codemode_available(containment.config.get("codemode_executable"))
+    if use_codemode:
+        print(f"task {task_id}: codemode available (batched inspection enabled)", flush=True)
     for iteration in range(1, args.max_iterations + 1):
         if time.time() > deadline_ts:
             fail_task(task_id, "deadline_exceeded", "worker deadline exceeded")
@@ -629,7 +671,8 @@ def main() -> int:
         print(f"task {task_id}: iteration {iteration} (model={args.model})", flush=True)
         task = inspect_task(task_id)
         note_if_working(task_id, task, f"iteration {iteration}: invoking opencode ({args.model})")
-        prompt = build_prompt(task, answer, resumed=continued, resume_kind=resume_kind)
+        prompt = build_prompt(task, answer, resumed=continued, resume_kind=resume_kind,
+                              codemode=use_codemode)
         next_status_check = 0.0
         def task_cancelled():
             nonlocal next_status_check

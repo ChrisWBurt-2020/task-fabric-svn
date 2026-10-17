@@ -204,15 +204,19 @@ def artifact_refs_for(repo_dir: Path) -> list[str]:
 # location); the worker only advertises it when present, so older
 # supervisors/manifests degrade gracefully to the prompt without this section.
 CODEMODE_PROMPT_SECTION = (
-    "\nBatched inspection (codemode, experimental): when you need 3+ consecutive "
-    "read-only workspace inspections (find files, read several files, filter), "
-    "write ONE short JavaScript program to /tmp/codemode-<name>.js that does the "
-    "coordination itself with Deno.readDir/Deno.readTextFile over /workspace and "
-    "prints a single JSON synthesis to stdout, then run "
-    "`/opt/task_fabric_svn/codemode /tmp/codemode-<name>.js` via bash. "
-    "One execution, one roundtrip — do not fan out the same reads as separate "
+    "\nBatched inspection (codemode) — USE THIS FIRST for multi-file work: when "
+    "the task needs information from 3+ files (finding files, reading several, "
+    "filtering, counting, cross-referencing), do NOT begin with individual "
+    "grep/read/bash calls. Write ONE short JavaScript program to "
+    "/tmp/codemode-<name>.js that does all the coordination itself with "
+    "Deno.readDir/Deno.readTextFile over /workspace and prints a single JSON "
+    "synthesis to stdout, then run `/opt/task_fabric_svn/codemode "
+    "/tmp/codemode-<name>.js` via bash. Every separate tool roundtrip re-sends "
+    "your entire context, so ten individual greps cost roughly ten times the "
+    "tokens of one batched run. When refining (trying another pattern, widening "
+    "a filter), edit and RE-RUN the script — do not fall back to new one-off "
     "tool calls. The sandbox is read-only (no network, no env, no subprocess, "
-    "20s cap); writes still go through your normal edit flow."
+    "20s cap, 64KB output); writes still go through your normal edit flow."
 )
 
 

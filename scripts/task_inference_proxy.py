@@ -11,11 +11,11 @@ Unix-socket proxy that:
 This proxy is additionally the binding point for spend-gate consumer
 identity (Phase-1 production grant, consumer "task-fabric-svn-harness-opencode"):
 
-  - every inbound x-task-fabric-svn-* / x-heron-* header and every task_fabric_svn_*
-    body metadata key is STRIPPED (a contained worker cannot spoof another consumer),
+  - every inbound x-task-fabric-svn-* header and every task_fabric_svn_* body metadata key is
+    STRIPPED (a contained worker cannot spoof another consumer),
   - the proxy injects exactly one canonical set from the owner-controlled
-    contract: x-heron-consumer, x-heron-trace-id, x-heron-work-id,
-  - the proxy signs X-Heron-Consumer-Attestation (HMAC-SHA256, key from
+    contract: x-task-fabric-svn-consumer, x-task-fabric-svn-trace-id, x-task-fabric-svn-work-id,
+  - the proxy signs X-Task-Fabric-Svn-Consumer-Attestation (HMAC-SHA256, key from
     TASK_FABRIC_SVN_PROXY_HMAC_SECRET) so 9router can verify the claim came from this
     proxy and not from arbitrary localhost traffic.
 
@@ -69,7 +69,13 @@ def load_proxy_config(path):
         config = json.loads(raw)
     except ValueError as e:
         raise ContainmentError("containment_config_invalid") from e
-    if set(config) != {"schema", "harness_executable", "proxy_socket", "contract"} or config["schema"] != 1:
+    required = {"schema", "harness_executable", "proxy_socket", "contract"}
+    # Optional codemode_executable key (experimental batched inspection):
+    # tolerated but not enforced here — the proxy is the spend-gate
+    # boundary and only needs the keys above. Must stay in sync with
+    # task_containment.load_config's allowed set.
+    if not required <= set(config) <= required | {"codemode_executable"} \
+            or config["schema"] != 1:
         raise ContainmentError("containment_config_invalid")
     contract = config["contract"]
     if set(contract) != {"task_id", "trace_id", "model", "consumer", "destination",
@@ -201,13 +207,13 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         upstream_headers = {}
         for name, value in self.headers.items():
             low = name.lower()
-            if low in ("host", "content-length", "authorization") or low in _HOP_BY_HOP or _is_task_fabric_svn_header(name) or low.startswith("x-heron-"):
+            if low in ("host", "content-length", "authorization") or low in _HOP_BY_HOP or _is_task_fabric_svn_header(name):
                 continue
             upstream_headers[name] = value
-        upstream_headers["X-Heron-Consumer"] = contract["consumer"]
-        upstream_headers["X-Heron-Trace-Id"] = contract["trace_id"]
-        upstream_headers["X-Heron-Work-Id"] = contract["task_id"]
-        upstream_headers["X-Heron-Consumer-Attestation"] = sign_attestation(
+        upstream_headers["X-Task-Fabric-Svn-Consumer"] = contract["consumer"]
+        upstream_headers["X-Task-Fabric-Svn-Trace-Id"] = contract["trace_id"]
+        upstream_headers["X-Task-Fabric-Svn-Work-Id"] = contract["task_id"]
+        upstream_headers["X-Task-Fabric-Svn-Consumer-Attestation"] = sign_attestation(
             contract["consumer"], contract["trace_id"], contract["task_id"],
             self.server.hmac_secret)
         # The client-supplied Authorization was stripped above: only the proxy

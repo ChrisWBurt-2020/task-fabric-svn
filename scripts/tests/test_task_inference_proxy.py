@@ -86,6 +86,51 @@ def expected_attestation(consumer, trace_id, work_id, secret, ts):
     return "v1,%s,%s" % (ts, hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest())
 
 
+class ProxyConfigShapeTests(unittest.TestCase):
+    """load_proxy_config must tolerate the optional codemode_executable key.
+
+    Regression: the codemode integration added the key to generated
+    manifests, and the proxy's own strict shape check rejected every new
+    manifest (proxy refusing to start: containment_config_invalid),
+    wedging all task dispatch. The proxy only enforces the spend-gate
+    keys; the optional key must stay in sync with
+    task_containment.load_config's allowed set.
+    """
+
+    def _write_manifest(self, extra):
+        tmp = Path(tempfile.mkdtemp(prefix="proxy-shape-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        manifest = {
+            "schema": 1,
+            "harness_executable": "/bin/true",
+            "proxy_socket": str(tmp / "x.socket"),
+            "contract": {
+                "task_id": "task-x", "trace_id": "trace-x", "model": "m",
+                "consumer": "c", "destination": "http://127.0.0.1:20128/v1/chat/completions",
+                "max_request_bytes": 100, "max_requests": 10,
+            },
+        }
+        manifest.update(extra)
+        p = tmp / "manifest.json"
+        p.write_text(json.dumps(manifest))
+        os.chmod(p, 0o600)
+        return p
+
+    def test_accepts_manifest_without_codemode_key(self):
+        cfg = proxy_mod.load_proxy_config(str(self._write_manifest({})))
+        self.assertNotIn("codemode_executable", cfg)
+
+    def test_accepts_manifest_with_codemode_key(self):
+        cfg = proxy_mod.load_proxy_config(
+            str(self._write_manifest({"codemode_executable": "/bin/true"})))
+        self.assertEqual(cfg["codemode_executable"], "/bin/true")
+
+    def test_rejects_unknown_key(self):
+        with self.assertRaises(Exception):
+            proxy_mod.load_proxy_config(
+                str(self._write_manifest({"evil_key": "x"})))
+
+
 class ProxyTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="proxy-test-"))
@@ -165,15 +210,15 @@ class ProxyTest(unittest.TestCase):
     def test_spoofed_consumer_header_is_replaced(self):
         status, _ = self._post(
             {"model": "qwen/qwen3.8-27b:free", "messages": []},
-            headers={"X-Heron-Consumer": "homenode-voice",
-                     "X-Heron-Trace-Id": "spoofed",
+            headers={"X-Task-Fabric-Svn-Consumer": "homenode-voice",
+                     "X-Task-Fabric-Svn-Trace-Id": "spoofed",
                      "Authorization": "Bearer worker-supplied"})
         self.assertTrue(status.endswith(b"200 OK"), status)
         self.assertEqual(len(self.upstream.requests), 1)
         seen = self.upstream.requests[0]["headers"]
-        self.assertEqual(seen.get("x-heron-consumer"), "task-fabric-svn-harness-opencode")
-        self.assertEqual(seen.get("x-heron-trace-id"), "trace-1")
-        self.assertEqual(seen.get("x-heron-work-id"), "task-test1")
+        self.assertEqual(seen.get("x-task-fabric-svn-consumer"), "task-fabric-svn-harness-opencode")
+        self.assertEqual(seen.get("x-task-fabric-svn-trace-id"), "trace-1")
+        self.assertEqual(seen.get("x-task-fabric-svn-work-id"), "task-test1")
         # The sandbox's spoofed key must never reach upstream; the proxy
         # injects the owner-provisioned 9router client key instead.
         self.assertEqual(seen.get("authorization"), "Bearer " + ROUTER_KEY)
@@ -196,7 +241,7 @@ class ProxyTest(unittest.TestCase):
     def test_attestation_is_valid(self):
         self._post({"model": "qwen/qwen3.8-27b:free", "messages": []})
         seen = self.upstream.requests[0]["headers"]
-        att = seen.get("x-heron-consumer-attestation")
+        att = seen.get("x-task-fabric-svn-consumer-attestation")
         self.assertIsNotNone(att)
         ver, ts, mac = att.split(",")
         self.assertEqual(ver, "v1")

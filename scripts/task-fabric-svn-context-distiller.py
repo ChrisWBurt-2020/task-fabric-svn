@@ -13,6 +13,7 @@ And notifies HomeNode (port 8790) over HTTP for immediate SSE broadcast.
 """
 
 import os
+import re
 import sys
 import json
 import glob
@@ -229,6 +230,29 @@ def build_bundle() -> dict:
     return payload
 
 
+
+def _node_token() -> str:
+    """Resolve the HomeNode bearer token at runtime.
+
+    Order: $HERON_NODE_TOKEN, then the private secrets file
+    ~/.config/heron/homenode-secrets.env. Never hardcode the token in
+    this (public) repository. Returns "" when unavailable, in which
+    case the notify call is skipped.
+    """
+    tok = os.environ.get("HERON_NODE_TOKEN", "").strip()
+    if tok:
+        return tok
+    try:
+        secrets_path = Path.home() / ".config" / "heron" / "homenode-secrets.env"
+        for line in secrets_path.read_text(encoding="utf-8").splitlines():
+            m = re.match(r'\s*HERON_NODE_TOKEN\s*=\s*"?([^"\n]+)"?', line)
+            if m:
+                return m.group(1).strip()
+    except OSError:
+        pass
+    return ""
+
+
 def notify_node(bundle_hash: str):
     import urllib.request
     payload = json.dumps({
@@ -238,11 +262,15 @@ def notify_node(bundle_hash: str):
         "summary": "Workstation context snapshot updated."
     }).encode("utf-8")
 
+    token = _node_token()
+    if not token:
+        return
+
     try:
         req = urllib.request.Request(
             NODE_NOTIFY_URL,
             data=payload,
-            headers={"Content-Type": "application/json", "Authorization": "Bearer local-secret"}
+            headers={"Content-Type": "application/json", "Authorization": "Bearer " + token}
         )
         urllib.request.urlopen(req, timeout=2)
     except Exception:

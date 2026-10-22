@@ -1,0 +1,17 @@
+task | ledger | external | verdict
+task-46b96f819960 | failed | no external trace found | CONSISTENT -- ledger evidence: failure_reason; no external success contradicts the ledger
+task-55a6b5f18814 | completed | no external claim | CONSISTENT -- ledger evidence: 1 artifact ref(s), result_summary
+task-5b6d6a040088 | failed | no external trace found | CONSISTENT -- ledger evidence: failure_reason; no external success contradicts the ledger
+task-66518de7c077 | failed | no external claim | CONSISTENT -- ledger evidence: failure_reason
+task-6889498f656c | failed | no external claim | CONSISTENT -- ledger evidence: failure_reason
+task-6cf882cf989f | completed | no external claim | CONSISTENT -- ledger evidence: 2 artifact ref(s), result_summary
+task-7992bae48730 | failed | PR #80 (nightshift/issue-79-runalignwords) MERGED | BLOCKED -- RECONCILE_BLOCKED: task task-7992bae48730 ledger=failed, PR #80 (nightshift/issue-79-runalignwords) MERGED -- ledger NOT trusted for this task; append a fulfilled_externally record naming the fulfiller + PR, never a silent rewrite
+task-b9d10a37ea56 | failed | no external claim | CONSISTENT -- ledger evidence: failure_reason
+task-f8a9daa2d3c8 | failed | no external claim | CONSISTENT -- ledger evidence: failure_reason
+task-ff30b8c36b8e | completed | no external trace found | CONSISTENT -- ledger evidence: 1 artifact ref(s), result_summary
+card ff400713-f569-439a-a0e5-1512ead547fe.json | task task-7992bae48730 | STALE_CARD -- STALE_CARD: ff400713-f569-439a-a0e5-1512ead547fe.json still sits in pending-approvals/ but task task-7992bae48730 is terminal (ledger=failed, created 5.2d ago) -- resolved; age this file out
+RECONCILE_BLOCKED: task task-7992bae48730 ledger=failed, PR #80 (nightshift/issue-79-runalignwords) MERGED -- ledger NOT trusted for this task; append a fulfilled_externally record naming the fulfiller + PR, never a silent rewrite
+STALE_CARD: ff400713-f569-439a-a0e5-1512ead547fe.json still sits in pending-approvals/ but task task-7992bae48730 is terminal (ledger=failed, created 5.2d ago) -- resolved; age this file out
+NOT RECONCILED -- 2 finding(s); the ledger is not trusted where named above.
+proposed fulfilled_externally records for 1 task(s) written to scripts/reconcile-fabric-ledger-examples/proposed-fulfilled-externally-2026-10-21.jsonl -- the live journal was NOT modified; appending is an operator act.
+EXIT=1

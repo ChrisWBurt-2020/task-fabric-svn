@@ -878,6 +878,79 @@ impl TaskLedger {
         Ok(record)
     }
 
+    // ---- task.record_fulfilled_externally ----
+
+    /// Operator record: this task's work was fulfilled outside the fabric
+    /// after the ledger closed it `failed` / `cancelled` (the parent did it
+    /// in chat, another worker landed it, ...). Appends the
+    /// `fulfilled_externally` Note journal event in exactly the shape
+    /// `scripts/reconcile_fabric_ledger.py` recognizes on read-back, and
+    /// nothing else: the task's status, failure reason and state history
+    /// are NOT rewritten — the record explains the ledger-vs-external
+    /// mismatch, it does not erase it. This is the append path
+    /// `note_progress` cannot serve (it requires `working`).
+    ///
+    /// Terminal failure states only: a live task has no mismatch to
+    /// explain, and a `completed` task's own result is its explanation.
+    pub fn record_fulfilled_externally(
+        &self,
+        task_id: &str,
+        fulfiller: &str,
+        pr: Option<u64>,
+        pr_url: Option<&str>,
+        head_commit: Option<&str>,
+    ) -> Result<TaskRecord, TaskError> {
+        let _lock = self.lock()?;
+        validate_id("task_id", task_id)?;
+        validate_text("fulfiller", fulfiller, true)?;
+        if let Some(pr) = pr {
+            if pr == 0 {
+                return Err(TaskError::Validation(
+                    "pr must be a positive PR number".into(),
+                ));
+            }
+        }
+        if let Some(pr_url) = pr_url {
+            validate_text("pr_url", pr_url, false)?;
+        }
+        if let Some(head_commit) = head_commit {
+            validate_claim_commit(head_commit)?;
+        }
+        let mut record = self.require(task_id)?;
+        if !matches!(record.status, TaskState::Failed | TaskState::Cancelled) {
+            return Err(TaskError::Validation(format!(
+                "fulfilled_externally explains a failed/cancelled task; \
+                 task is {} — no external-fulfillment record applies",
+                record.status
+            )));
+        }
+        let now = crate::now_epoch_seconds();
+        let mut fulfillment = serde_json::Map::new();
+        fulfillment.insert("fulfiller".into(), serde_json::json!(fulfiller));
+        if let Some(pr) = pr {
+            fulfillment.insert("pr".into(), serde_json::json!(pr));
+        }
+        if let Some(pr_url) = pr_url {
+            fulfillment.insert("pr_url".into(), serde_json::json!(pr_url));
+        }
+        if let Some(head_commit) = head_commit {
+            fulfillment.insert("head_commit".into(), serde_json::json!(head_commit));
+        }
+        fulfillment.insert(
+            "recorded_by".into(),
+            serde_json::json!("task-fabric-svn-work"),
+        );
+        fulfillment.insert("at".into(), serde_json::json!(now));
+        record.updated_at = now;
+        self.append_event(
+            task_id,
+            TaskEventKind::Note,
+            serde_json::json!({ "fulfilled_externally": fulfillment }),
+        )?;
+        self.write_snapshot(&record)?;
+        Ok(record)
+    }
+
     /// Worker finished: working -> completed.
     pub fn complete(
         &self,
@@ -1152,6 +1225,17 @@ fn validate_sha256(sha256: &str) -> Result<(), TaskError> {
     if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(TaskError::Validation(
             "manifest sha256 must be 64 hex chars".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// A git commit claim: short or full hex sha (external claims use 7..=40).
+/// Not validate_sha256 — that pins 64-char content digests.
+fn validate_claim_commit(commit: &str) -> Result<(), TaskError> {
+    if commit.len() < 7 || commit.len() > 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(TaskError::Validation(
+            "head_commit must be 7..=40 hex chars".into(),
         ));
     }
     Ok(())
@@ -1994,5 +2078,165 @@ mod tests {
             .record_diff_manifest(&record.task_id, huge)
             .unwrap_err();
         assert!(matches!(err, TaskError::Validation(_)), "cap: {err}");
+    }
+
+    fn run_to_failed(ledger: &TaskLedger, task_id: &str) -> TaskRecord {
+        run_to_working(ledger, task_id);
+        ledger
+            .fail(task_id, "unsupported_escalation")
+            .expect("fail")
+    }
+
+    #[test]
+    fn record_fulfilled_externally_appends_note_and_preserves_terminal_state() {
+        let ledger = test_ledger();
+        let record = ledger.submit(submit_request("conv-fe")).expect("submit");
+        let record = run_to_failed(&ledger, &record.task_id);
+
+        let updated = ledger
+            .record_fulfilled_externally(
+                &record.task_id,
+                "ChrisWBurt-2020",
+                Some(80),
+                Some("https://github.com/ChrisWBurt-2020/heron-field/pull/80"),
+                Some("d450925c9b4d64db87884d81a62a86f6b5458d48"),
+            )
+            .expect("record fulfilled_externally");
+
+        // The ledger itself is NOT rewritten: still failed, same reason,
+        // no fabricated state transition.
+        assert_eq!(updated.status, TaskState::Failed);
+        assert_eq!(
+            updated.failure_reason.as_deref(),
+            Some("unsupported_escalation")
+        );
+        assert_eq!(updated.state_history, record.state_history);
+
+        // The journal carries the Note event in the reconciler's shape
+        // (scripts/reconcile_fabric_ledger.py find_fulfillment_records).
+        let events = ledger.history(&record.task_id, 100).expect("history");
+        let note = events
+            .iter()
+            .rev()
+            .find(|e| e.kind == TaskEventKind::Note)
+            .expect("Note event");
+        let fe = &note.payload["fulfilled_externally"];
+        assert_eq!(fe["fulfiller"], "ChrisWBurt-2020");
+        assert_eq!(fe["pr"], 80);
+        assert_eq!(
+            fe["pr_url"],
+            "https://github.com/ChrisWBurt-2020/heron-field/pull/80"
+        );
+        assert_eq!(
+            fe["head_commit"],
+            "d450925c9b4d64db87884d81a62a86f6b5458d48"
+        );
+        assert_eq!(fe["recorded_by"], "task-fabric-svn-work");
+        assert!(fe["at"].as_u64().is_some());
+
+        // Snapshot round-trip preserves the (unrewritten) terminal state.
+        let reloaded = ledger
+            .inspect(&record.task_id)
+            .expect("inspect")
+            .expect("exists");
+        assert_eq!(reloaded.status, TaskState::Failed);
+        assert_eq!(reloaded.state_history, record.state_history);
+    }
+
+    #[test]
+    fn record_fulfilled_externally_works_for_cancelled_and_omits_absent_fields() {
+        let ledger = test_ledger();
+        let record = ledger.submit(submit_request("conv-fe-cancel")).expect("submit");
+        run_to_working(&ledger, &record.task_id);
+        let record = ledger.cancel(&record.task_id, "superseded").expect("cancel");
+
+        let updated = ledger
+            .record_fulfilled_externally(&record.task_id, "parent-in-chat", None, None, None)
+            .expect("record fulfilled_externally");
+        assert_eq!(updated.status, TaskState::Cancelled);
+
+        let events = ledger.history(&record.task_id, 100).expect("history");
+        let note = events
+            .iter()
+            .rev()
+            .find(|e| e.kind == TaskEventKind::Note)
+            .expect("Note event");
+        let fe = note.payload["fulfilled_externally"]
+            .as_object()
+            .expect("fulfilled_externally object");
+        assert_eq!(fe["fulfiller"], "parent-in-chat");
+        assert!(!fe.contains_key("pr"), "absent pr must be omitted: {fe:?}");
+        assert!(
+            !fe.contains_key("pr_url"),
+            "absent pr_url must be omitted: {fe:?}"
+        );
+        assert!(
+            !fe.contains_key("head_commit"),
+            "absent head_commit must be omitted: {fe:?}"
+        );
+    }
+
+    #[test]
+    fn record_fulfilled_externally_rejects_live_and_completed_tasks() {
+        let ledger = test_ledger();
+        let record = ledger.submit(submit_request("conv-fe-live")).expect("submit");
+
+        // Queued: a live task has no mismatch to explain.
+        let err = ledger
+            .record_fulfilled_externally(&record.task_id, "someone", None, None, None)
+            .unwrap_err();
+        assert!(matches!(err, TaskError::Validation(_)), "queued: {err}");
+
+        // Working: same refusal.
+        let record = run_to_working(&ledger, &record.task_id);
+        let err = ledger
+            .record_fulfilled_externally(&record.task_id, "someone", None, None, None)
+            .unwrap_err();
+        assert!(matches!(err, TaskError::Validation(_)), "working: {err}");
+
+        // Completed: the task's own result is its explanation.
+        let record = ledger
+            .complete(&record.task_id, "done in fabric", &[], &[])
+            .expect("complete");
+        let err = ledger
+            .record_fulfilled_externally(&record.task_id, "someone", Some(1), None, None)
+            .unwrap_err();
+        assert!(matches!(err, TaskError::Validation(_)), "completed: {err}");
+
+        // No rejected call journaled anything.
+        let events = ledger.history(&record.task_id, 100).expect("history");
+        assert!(
+            events.iter().all(|e| e.kind != TaskEventKind::Note),
+            "rejected records must not reach the journal: {events:?}"
+        );
+    }
+
+    #[test]
+    fn record_fulfilled_externally_validates_fields() {
+        let ledger = test_ledger();
+        let record = ledger.submit(submit_request("conv-fe-bad")).expect("submit");
+        let record = run_to_failed(&ledger, &record.task_id);
+        let before = ledger.history(&record.task_id, 100).expect("history").len();
+
+        let bad = |fulfiller: &str, pr: Option<u64>, head: Option<&str>| {
+            ledger.record_fulfilled_externally(&record.task_id, fulfiller, pr, None, head)
+        };
+        assert!(bad("", None, None).is_err(), "empty fulfiller");
+        assert!(bad("   ", None, None).is_err(), "blank fulfiller");
+        assert!(bad("ok", Some(0), None).is_err(), "pr 0");
+        assert!(bad("ok", None, Some("not-a-sha")).is_err(), "non-hex commit");
+        assert!(bad("ok", None, Some("abc")).is_err(), "too-short commit");
+        let err = bad("ok", Some(0), None).unwrap_err();
+        assert!(matches!(err, TaskError::Validation(_)), "validation: {err}");
+
+        // Unknown task is NotFound, not a validation failure.
+        let err = ledger
+            .record_fulfilled_externally("task-nope", "someone", None, None, None)
+            .unwrap_err();
+        assert!(matches!(err, TaskError::NotFound(_)), "not found: {err}");
+
+        // Rejected appends leave the journal untouched.
+        let after = ledger.history(&record.task_id, 100).expect("history").len();
+        assert_eq!(before, after);
     }
 }

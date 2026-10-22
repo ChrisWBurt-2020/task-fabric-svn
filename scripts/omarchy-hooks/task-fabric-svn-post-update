@@ -15,7 +15,11 @@ doctor_output=$(timeout --kill-after=2s 15s task-fabric-svn-work doctor 2>&1) ||
 }
 
 for unit in task-fabric-svn-workd.service task-fabric-svn-soundd.service; do
-  if command -v systemctl >/dev/null 2>&1 && ! systemctl --user is-active --quiet "$unit"; then
+  # Only units the operator has enabled are expected to run: the installer
+  # deliberately leaves daemons disabled until explicitly enabled, so a
+  # disabled unit (e.g. task-fabric-svn-soundd.service) is a choice, not a
+  # failure, and must stay silent here.
+  if command -v systemctl >/dev/null 2>&1 && systemctl --user is-enabled --quiet "$unit" 2>/dev/null && ! systemctl --user is-active --quiet "$unit"; then
     if command -v omarchy-notification-send >/dev/null 2>&1; then
       omarchy-notification-send -u critical -g "󰒓" "Task Fabric SVN service needs attention" "$unit is not active after update"
     fi

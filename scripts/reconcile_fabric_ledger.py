@@ -30,10 +30,10 @@ This verifier reconciles, read-only:
     trusted for that task. The ledger is never silently rewritten -- this
     tool writes nothing into the state dir; `--emit-records` writes the
     proposed record lines to a caller-chosen file outside it, for an
-    operator to append. (Note: the current ledger CLI cannot append notes
-    to terminal tasks -- `note_progress` requires `working` -- so the append
-    path itself is separate follow-up work; the record shape is defined
-    here and recognized on read-back.)
+    operator to append. (The append itself is the ledger CLI's
+    `task record-fulfilled-externally` subcommand -- `note_progress`
+    requires `working`, so terminal tasks needed their own path; the
+    record shape is defined here and recognized on read-back.)
   * a terminal task with no evidence record anywhere (no artifact/receipt
     refs, no result/failure reason, no external trace) FAILS by name;
   * a NON-terminal task whose last activity is older than `--stale-hours`

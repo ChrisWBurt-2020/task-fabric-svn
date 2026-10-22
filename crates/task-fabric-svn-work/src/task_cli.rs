@@ -21,6 +21,8 @@
 //!     [--artifact-ref A ...] [--receipt-ref R ...]
 //! task-fabric-svn-work task fail <task-id> --reason R
 //! task-fabric-svn-work task cancel <task-id> --reason R
+//! task-fabric-svn-work task record-fulfilled-externally <task-id> --fulfiller F \
+//!     [--pr N] [--pr-url U] [--head-commit H]
 //! task-fabric-svn-work task diff --task-id <id> --repo <path> --baseline <rev> [--json]
 //! task-fabric-svn-work task record-diff-manifest --task-id <id> --manifest '<json>'
 //! task-fabric-svn-work task create-pr --task-id <id> --title <t> --body <b> [--base B] [--head H]
@@ -100,6 +102,7 @@ fn dispatch(
         "merge" => merge_cmd(ledger, args),
         "fail" => fail_cmd(ledger, args),
         "cancel" => cancel_cmd(ledger, args),
+        "record-fulfilled-externally" => record_fulfilled_externally_cmd(ledger, args),
         "help" | "--help" | "-h" => {
             print_task_help();
             Ok(serde_json::json!({ "ok": true }))
@@ -116,7 +119,7 @@ fn print_task_help() {
          \n\
          Subcommands: submit inspect list history start begin-work note-progress\n\
          request-input respond request-approval approve complete fail cancel\n\
-         diff record-diff-manifest create-pr merge\n\
+         record-fulfilled-externally diff record-diff-manifest create-pr merge\n\
          \n\
          Every subcommand prints one JSON object to stdout. See task_cli.rs for flags."
     );
@@ -438,6 +441,35 @@ fn cancel_cmd(ledger: &TaskLedger, args: &[String]) -> Result<serde_json::Value,
         ))?,
         None => task_result(ledger.cancel(task_id, required(&flags, "reason")?))?,
     };
+    Ok(ok_task(&record))
+}
+
+/// Append the `fulfilled_externally` journal record for a failed/cancelled
+/// task whose work landed outside the fabric. Journal-only: the ledger
+/// state is not rewritten (see TaskLedger::record_fulfilled_externally and
+/// scripts/reconcile_fabric_ledger.py, which recognizes the record).
+fn record_fulfilled_externally_cmd(
+    ledger: &TaskLedger,
+    args: &[String],
+) -> Result<serde_json::Value, String> {
+    let task_id = positional(args, 0, "task id")?;
+    let flags = parse_flags(&args[1..])?;
+    let pr = match optional(&flags, "pr") {
+        Some(raw) => Some(
+            raw.parse::<u64>()
+                .ok()
+                .filter(|n| *n > 0)
+                .ok_or_else(|| "--pr must be a positive PR number".to_string())?,
+        ),
+        None => None,
+    };
+    let record = task_result(ledger.record_fulfilled_externally(
+        task_id,
+        required(&flags, "fulfiller")?,
+        pr,
+        optional(&flags, "pr-url"),
+        optional(&flags, "head-commit"),
+    ))?;
     Ok(ok_task(&record))
 }
 
@@ -996,6 +1028,89 @@ mod tests {
             &task_id, "--generation", &generation, "--reason", "user cancelled",
         ])).unwrap();
         assert_eq!(cancelled["task"]["status"], "cancelled");
+    }
+
+    fn fail_working_task(ledger: &TaskLedger, conv: &str) -> String {
+        let task_id = submit_working_task(ledger, conv);
+        let failed = dispatch(
+            ledger,
+            "fail",
+            &args(&[&task_id, "--reason", "unsupported_escalation"]),
+        )
+        .expect("fail");
+        assert_eq!(failed["task"]["status"], "failed");
+        task_id
+    }
+
+    #[test]
+    fn record_fulfilled_externally_cli_roundtrip() {
+        let ledger = test_ledger();
+        let task_id = fail_working_task(&ledger, "conv-fe-cli");
+        let value = dispatch(
+            &ledger,
+            "record-fulfilled-externally",
+            &args(&[
+                &task_id,
+                "--fulfiller", "ChrisWBurt-2020",
+                "--pr", "80",
+                "--pr-url", "https://github.com/ChrisWBurt-2020/heron-field/pull/80",
+                "--head-commit", "d450925c9b4d64db87884d81a62a86f6b5458d48",
+            ]),
+        )
+        .expect("record-fulfilled-externally");
+        assert_eq!(value["ok"], true);
+        // Journal-only append: the task stays failed, never rewritten.
+        assert_eq!(value["task"]["status"], "failed");
+        assert_eq!(
+            value["task"]["failure_reason"],
+            "unsupported_escalation"
+        );
+
+        let events = ledger.history(&task_id, 100).expect("history");
+        let note = events
+            .iter()
+            .rev()
+            .find(|e| e.kind == TaskEventKind::Note)
+            .expect("Note event");
+        let fe = &note.payload["fulfilled_externally"];
+        assert_eq!(fe["fulfiller"], "ChrisWBurt-2020");
+        assert_eq!(fe["pr"], 80);
+        assert_eq!(
+            fe["head_commit"],
+            "d450925c9b4d64db87884d81a62a86f6b5458d48"
+        );
+    }
+
+    #[test]
+    fn record_fulfilled_externally_cli_rejects_bad_pr_and_live_task() {
+        let ledger = test_ledger();
+        let task_id = fail_working_task(&ledger, "conv-fe-cli-bad");
+        for bad in ["0", "abc"] {
+            let err = dispatch(
+                &ledger,
+                "record-fulfilled-externally",
+                &args(&[&task_id, "--fulfiller", "someone", "--pr", bad]),
+            )
+            .unwrap_err();
+            assert!(err.contains("--pr must be a positive PR number"), "{err}");
+        }
+        let err = dispatch(
+            &ledger,
+            "record-fulfilled-externally",
+            &args(&[&task_id]),
+        )
+        .unwrap_err();
+        assert!(err.contains("--fulfiller is required"), "{err}");
+
+        // A still-working task has no mismatch to explain.
+        let live_id = submit_working_task(&ledger, "conv-fe-cli-live");
+        let err = dispatch(
+            &ledger,
+            "record-fulfilled-externally",
+            &args(&[&live_id, "--fulfiller", "someone"]),
+        )
+        .unwrap_err();
+        assert!(err.contains("fulfilled_externally explains"), "{err}");
     }
 
     #[test]

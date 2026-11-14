@@ -211,10 +211,21 @@ adapter/ templates/      desktop-shell integration examples
 
 ## Tests
 
-Rust: `cargo test` per crate. Python: `scripts/tests/test_*.py` (unittest,
-no live state required) — lease exclusivity, gate refusals, fail-closed
-containment, marker-protocol violations, crash budgets, orphan
-reconciliation.
+Rust (stable channel, pinned by rust-toolchain.toml):
+
+    cargo test --workspace
+
+Python (3.11+; stdlib unittest, no pip dependencies):
+
+    python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+The Python suite uses no live task state, but some tests exec real
+binaries: bwrap and socat (containment), opencode on PATH (harness
+resolution), and deno (codemode). Tests whose binary is missing are
+skipped with a reason, so a clean machine reports OK (skipped=N).
+
+Covered: lease exclusivity, gate refusals, fail-closed containment,
+marker-protocol violations, crash budgets, orphan reconciliation.
 
 ## License
 

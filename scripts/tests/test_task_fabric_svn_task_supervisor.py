@@ -5,6 +5,7 @@ injectable pid/boot-id functions."""
 import importlib.util
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -668,6 +669,7 @@ class ReconcileTests(SupervisorTestBase):
 
 
 
+@unittest.skipUnless(shutil.which("opencode"), "opencode not installed")
 class HarnessResolutionTests(SupervisorTestBase):
     def test_default_harness_resolves_to_a_real_executable(self):
         # Must never be the mise shim: the shim cannot exec inside the bwrap

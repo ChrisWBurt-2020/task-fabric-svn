@@ -134,6 +134,31 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _drain_body(self, length):
+        """Discard an already-rejected request body before closing.
+
+        Answering from Content-Length alone and closing with the body
+        unread lets the kernel reset the connection and destroy the
+        response before the client reads it (seen as ECONNRESET on some
+        hosts, clean delivery on others). Shut down the write side so
+        the client sees a clean FIN after the response, then discard
+        what it sends, bounded by a short timeout and a byte cap.
+        """
+        try:
+            self.connection.shutdown(socket.SHUT_WR)
+        except OSError:
+            return
+        remaining = min(length, 1 << 20)
+        self.connection.settimeout(2.0)
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass
+
     def _contract(self):
         return self.server.proxy_contract
 
@@ -181,6 +206,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         if length > contract["max_request_bytes"]:
             self._send_json(413, {"error": {"code": "task_proxy_body_too_large", "retryable": False,
                                             "message": "request body exceeds contract limit"}})
+            self._drain_body(length)
             return
         raw = self.rfile.read(length) if length else b""
         if len(raw) > contract["max_request_bytes"]:

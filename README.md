@@ -1,7 +1,7 @@
 # Task Fabric SVN
 
 A local-first control plane for working with coding agents. One registry
-describes your projects. A read-only status daemon observes them, while a
+describes your projects. A status daemon observes them and handles the desktop side, while a
 separate durable task fabric dispatches bounded work to contained agent
 harnesses — with honest failure semantics and fail-closed spend control
 throughout.
@@ -14,8 +14,13 @@ Built in Rust (5 crates) and Python, deployed as systemd user services.
 services, and review-class actions in `projects.toml`.
 `task-fabric-svn-work status --json` reports git state, service health, and
 next actions across all of them — read-only collection, never a side effect.
-Observation and execution are separate planes: the status daemon cannot
-start, stop, or edit anything.
+Observation and execution are separate planes. Status collection
+(status --json) is read-only. The daemon (workd) is where desktop side
+effects live: it launches declared actions and world surfaces (terminals,
+TUIs, web apps, a Chromium window), starts a world's declared user
+services, arranges windows, applies a world theme, sends desktop
+notifications, and holds an idle/sleep inhibitor while agents run. It has
+no task-ledger code and does not dispatch or complete tasks.
 
 **Task fabric.** Durable tasks with an explicit state machine (below). Submit
 a task from anywhere; the supervisor discovers, validates, leases, launches,
@@ -190,7 +195,7 @@ systemctl --user enable --now task-fabric-svn-task-supervisor.service
 ```
 crates/task-fabric-svn-work-core   status, world state, task ledger, attention + audio policy
 crates/task-fabric-svn-work        `task-fabric-svn-work` CLI (status, task, audio, signals)
-crates/task-fabric-svn-workd       status daemon (Unix socket, desktop notifications)
+crates/task-fabric-svn-workd       status and desktop daemon (Unix socket, declared actions, world and window effects)
 crates/task-fabric-svn-soundd      adaptive notification audio / local TTS
 crates/task-fabric-svn-experiment-worker  bounded, isolated evaluation trials
 scripts/                 task supervisor, worker, containment, per-task proxy,

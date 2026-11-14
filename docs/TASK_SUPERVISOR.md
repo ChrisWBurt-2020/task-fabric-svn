@@ -81,8 +81,6 @@ Enable only after you have verified the install in your own environment:
 cp systemd/task-fabric-svn-task-supervisor.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now task-fabric-svn-task-supervisor.service
-# then retire the polling loop:
-systemctl --user disable --now task-fabric-svn-task-worker.service
 ```
 
 Logs go to the journal (`journalctl --user -u task-fabric-svn-task-supervisor`) and

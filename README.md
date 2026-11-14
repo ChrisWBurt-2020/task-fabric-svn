@@ -220,7 +220,7 @@ crates/task-fabric-svn-workd       status and desktop daemon (Unix socket, decla
 crates/task-fabric-svn-soundd      adaptive notification audio / local TTS
 crates/task-fabric-svn-experiment-worker  bounded, isolated evaluation trials
 scripts/                 task supervisor, worker, containment, per-task proxy,
-                         installers, TTS helpers (each with unit tests)
+                         installers, TTS helpers (unit tests cover the supervisor, worker, containment, proxy and manifests, ledger reconcile, and codemode; installers and TTS helpers have none)
 systemd/                 user service units
 contracts/v1/            JSON schemas for world events and transitions
 docs/                    supervisor design, worker protocol, install guide

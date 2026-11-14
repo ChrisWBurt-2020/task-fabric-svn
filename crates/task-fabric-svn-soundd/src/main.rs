@@ -2534,7 +2534,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn speak_command_validates_text_and_voice() {
         let ok = serde_json::json!({"command": "speak", "text": "Memento mori.", "voice": "am_michael"});
         assert_eq!(
@@ -2576,6 +2575,7 @@ mod tests {
         assert_eq!(decoded.resolved_voice_source.as_deref(), Some("global_override"));
     }
 
+    #[test]
     fn kokoro_voice_resolves_per_app() {
         let mut voices = HashMap::new();
         voices.insert("claude".into(), "af_heart".into());

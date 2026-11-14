@@ -1,5 +1,6 @@
 [Unit]
 Description=Task Fabric SVN adaptive notification audio
+Documentation=https://github.com/ChrisWBurt-2020/task-fabric-svn
 After=graphical-session.target pipewire.service
 
 [Service]

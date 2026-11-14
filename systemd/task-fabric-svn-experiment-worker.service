@@ -1,6 +1,6 @@
 [Unit]
 Description=Task Fabric SVN bounded experiment trial worker
-Documentation=https://github.com/quantum-heron/task-fabric-svn
+Documentation=https://github.com/ChrisWBurt-2020/task-fabric-svn
 After=graphical-session.target
 
 [Service]

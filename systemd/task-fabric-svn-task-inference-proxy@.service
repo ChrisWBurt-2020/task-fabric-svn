@@ -1,6 +1,6 @@
 [Unit]
 Description=Task Fabric SVN task inference proxy (%i)
-Documentation=https://github.com/quantum-heron/task-fabric-svn
+Documentation=https://github.com/ChrisWBurt-2020/task-fabric-svn
 # Managed by task-fabric-svn-task-supervisor: one instance per dispatched task.
 # The instance name (%i) is the task id; the supervisor generates the
 # per-task manifest at

@@ -338,7 +338,7 @@ if ((apply)); then
   mkdir -p "$target_template_dir"
   mkdir -p "$target_audio_cache"
 else
-  say "Would build and install $target_cli, $target_daemon, and $target_experiment_worker"
+  say "Would build and install $target_cli, $target_daemon, $target_sound_daemon, and $target_experiment_worker"
 fi
 if ((skip_plugin)); then
   say "Skipping optional Task Fabric SVN Pulse plugin (--skip-plugin)"

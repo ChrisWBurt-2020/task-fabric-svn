@@ -189,14 +189,27 @@ The installer is deliberately conservative — preview first, apply second:
 ./scripts/install.sh --apply  # timestamped backup, then installs
 ```
 
-To dispatch tasks, register a repository in `config/task-repositories.toml`
-(a deliberate, committed act), then enable the supervisor:
+To dispatch tasks, register a repository in the installed task registry,
+`~/.local/share/task-fabric-svn/config/task-repositories.toml` (seeded by
+the installer from `config/task-repositories.toml`;
+`TASK_FABRIC_SVN_TASK_REPOSITORIES` overrides the path), then enable the
+supervisor:
 
 ```sh
 cp systemd/task-fabric-svn-task-supervisor.service ~/.config/systemd/user/
+cp systemd/task-fabric-svn-task-inference-proxy@.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now task-fabric-svn-task-supervisor.service
 ```
+
+`./scripts/install.sh --apply` performs those copies for you, and also
+installs the scripts the units run to `~/.local/share/task-fabric-svn/scripts/`
+— the units execute the installed copies, not your checkout, so re-run the
+installer after changing them.
+
+If you copy the units manually without the installer, edit their
+`ExecStart` (and the supervisor's `ReadWritePaths`) to point at your
+checkout instead — the shipped units assume the installed layout above.
 
 ## Layout
 

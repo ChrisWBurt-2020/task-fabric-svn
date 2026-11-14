@@ -54,6 +54,9 @@ source_projects="$repo_root/examples/projects.toml"
 source_unit="$repo_root/systemd/task-fabric-svn-workd.service"
 source_sound_unit="$repo_root/systemd/task-fabric-svn-soundd.service"
 source_experiment_unit="$repo_root/systemd/task-fabric-svn-experiment-worker.service"
+source_supervisor_unit="$repo_root/systemd/task-fabric-svn-task-supervisor.service"
+source_proxy_unit="$repo_root/systemd/task-fabric-svn-task-inference-proxy@.service"
+source_registry="$repo_root/config/task-repositories.toml"
 source_audio_config="$repo_root/config/audio.toml"
 source_menu="$repo_root/config/omarchy-menu.fragment.jsonc"
 source_bindings="$repo_root/config/hypr-bindings.fragment.lua"
@@ -73,6 +76,10 @@ target_projects="$config_home/task-fabric-svn/projects.toml"
 target_unit="$config_home/systemd/user/task-fabric-svn-workd.service"
 target_sound_unit="$config_home/systemd/user/task-fabric-svn-soundd.service"
 target_experiment_unit="$config_home/systemd/user/task-fabric-svn-experiment-worker.service"
+target_supervisor_unit="$config_home/systemd/user/task-fabric-svn-task-supervisor.service"
+target_proxy_unit="$config_home/systemd/user/task-fabric-svn-task-inference-proxy@.service"
+target_scripts_dir="$home_root/.local/share/task-fabric-svn/scripts"
+target_registry="$home_root/.local/share/task-fabric-svn/config/task-repositories.toml"
 target_audio_config="$config_home/task-fabric-svn/audio.toml"
 target_phrases="$config_home/task-fabric-svn/phrases.toml"
 target_bin_dir="$home_root/.local/bin"
@@ -99,7 +106,7 @@ active_task_fabric_svn_widget() {
   ' "$target_shell" >/dev/null 2>&1
 }
 
-for required in "$source_projects" "$source_unit" "$source_sound_unit" "$source_experiment_unit" "$source_audio_config" "$source_menu" "$source_bindings" "$source_audio_plugin" "$source_audio_assets" "$source_notification_patch" "$source_polkit_patch" "$source_kokoro_wrapper" "$source_kokoro_launcher" "$source_hook_post_boot" "$source_hook_post_update" "$source_hook_battery_low" "$source_phrases"; do
+for required in "$source_projects" "$source_unit" "$source_sound_unit" "$source_experiment_unit" "$source_supervisor_unit" "$source_proxy_unit" "$source_registry" "$source_audio_config" "$source_menu" "$source_bindings" "$source_audio_plugin" "$source_audio_assets" "$source_notification_patch" "$source_polkit_patch" "$source_kokoro_wrapper" "$source_kokoro_launcher" "$source_hook_post_boot" "$source_hook_post_update" "$source_hook_battery_low" "$source_phrases"; do
   [[ -e "$required" ]] || { printf 'Missing repository source: %s\n' "$required" >&2; exit 1; }
 done
 
@@ -313,6 +320,20 @@ install_project_seed
 install_file "$source_unit" "$target_unit" 0644
 install_file "$source_sound_unit" "$target_sound_unit" 0644
 install_file "$source_experiment_unit" "$target_experiment_unit" 0644
+install_file "$source_supervisor_unit" "$target_supervisor_unit" 0644
+install_file "$source_proxy_unit" "$target_proxy_unit" 0644
+# The supervisor and proxy units run installed copies of the scripts, not
+# the checkout; re-running this installer refreshes them.
+for script in "$repo_root"/scripts/*.py; do
+  install_file "$script" "$target_scripts_dir/$(basename -- "$script")" 0755
+done
+# The task registry is a seed: copy it only when absent, so a user's
+# registered repositories are never clobbered by a reinstall.
+if [[ -e "$target_registry" ]]; then
+  say "Preserving existing task registry: $target_registry (repository file is seed-only)"
+else
+  install_file "$source_registry" "$target_registry" 0600
+fi
 if [[ -e "$target_audio_config" ]]; then
   say "Preserving existing audio policy: $target_audio_config"
   ensure_audio_policy_keys "$target_audio_config"

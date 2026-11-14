@@ -73,8 +73,11 @@ The worker and its harness communicate through a three-marker protocol
 - `TASK_FABRIC_SVN_DONE:` — the agent claims completion, with a summary and
   artifact refs.
 
-A worker exit **never** implies success — only the ledger does. Zero, two, or
-malformed markers fail the task with an honest reason. A denied approval ends
+A worker exit **never** implies success — only the ledger does. A turn with no recognizable marker (missing, empty, or
+malformed) fails the task with an honest reason. If a turn carries several
+markers, precedence applies (QUESTION > APPROVAL > DONE), so a turn that
+asks something is never treated as done. If one marker appears more than
+once, the last occurrence is used. A denied approval ends
 the task terminally; the worker never retries a denied action on its own.
 
 ### 2. Fail-closed spend control

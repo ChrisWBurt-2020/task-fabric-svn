@@ -8,7 +8,7 @@ This document specifies the marker contract between the Task Fabric SVN task wor
 
 - The harness emits this marker at the end of a turn when a human decision is required.
 - `<question>` must be a single line of plain text (no markdown formatting).
-- **Exactly** one `TASK_FABRIC_SVN_QUESTION:` line must appear, and nothing else may follow it on that line or subsequently in the turn.
+- End the turn with one `TASK_FABRIC_SVN_QUESTION:` line. It should be the last line of the turn; if it appears more than once, the last occurrence is used.
 - The worker moves the task to `input_required`, prompts the human, and waits for a response before resuming the harness in the same session.
 - If the harness needs to ask multiple questions, it should do so across separate turns, emitting one `TASK_FABRIC_SVN_QUESTION:` per turn.
 
@@ -16,7 +16,7 @@ This document specifies the marker contract between the Task Fabric SVN task wor
 
 - The harness emits this marker at the end of a turn when it needs the human to approve a specific action before taking it.
 - `<short description of the action>` must be a single line of plain text naming the action (e.g. `TASK_FABRIC_SVN_APPROVAL: push the docs commit to origin`).
-- **Exactly** one `TASK_FABRIC_SVN_APPROVAL:` line must appear, and nothing else may follow it on that line or subsequently in the turn.
+- End the turn with one `TASK_FABRIC_SVN_APPROVAL:` line. It should be the last line of the turn; if it appears more than once, the last occurrence is used.
 - The worker moves the task to `approval_required` with the action description and waits. The human resolves the gate with one of:
   - `task-fabric-svn-work task approve <task-id> --approved true` — yes, proceed
   - `task-fabric-svn-work task approve <task-id> --approved true --reason "<write-in>"` — yes, with a free-text instruction the worker passes to the harness as a hard constraint
@@ -27,7 +27,7 @@ This document specifies the marker contract between the Task Fabric SVN task wor
 
 - The harness emits this marker at the end of a completed turn to signal successful task completion.
 - `<result summary>` must be a concise summary (≤4000 characters) of what was accomplished, plus any new/modified repo files as artifact refs (via `git status`).
-- **Exactly** one `TASK_FABRIC_SVN_DONE:` line must appear, and nothing else may follow it.
+- End a completed turn with one `TASK_FABRIC_SVN_DONE:` line as its final output. If more than one appears, the last one is used.
 - After `TASK_FABRIC_SVN_DONE`, the task is considered complete and the worker exits.
 
 ## Marker Precedence
@@ -47,7 +47,7 @@ A turn that asks something — or requests approval — is not done. When severa
 
 ## Failure Conditions
 
-- Zero, two+, or malformed `TASK_FABRIC_SVN_QUESTION:` / `TASK_FABRIC_SVN_APPROVAL:` / `TASK_FABRIC_SVN_DONE:` markers cause the task to fail with an honest reason.
+- A turn with no recognizable marker (missing, empty, or malformed) causes the task to fail with an honest reason. Several markers on one turn resolve by the precedence rule above, and a repeated marker uses its last occurrence; neither case is a failure.
 - Non-zero exit, timeout, or missing marker results in task failure (no silent retries, no invented results).
 - A denied approval ends the task terminally (`cancelled`, with `approval_denied: <why>` recorded as the reason).
 

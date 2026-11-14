@@ -1,5 +1,6 @@
 [Unit]
 Description=Task Fabric SVN local LLM server (notification personality quips)
+Documentation=https://github.com/ChrisWBurt-2020/task-fabric-svn
 After=network.target
 
 [Service]

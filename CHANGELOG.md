@@ -2,6 +2,10 @@
 
 Semantic versioning (`v0.x.y` annotated tags). Newest first.
 
+Note: this public repo begins at a squashed snapshot (ad38679, 2026-10-04). Tags and hashes below are from the private history and won't resolve here.
+
+A HomeNode bearer token committed in early history (before 12db5e3) was revoked on 2026-10-21; it no longer grants access.
+
 ## v0.10.0 — 2026-09-23
 - soundd: parallel notification profiles — `profiles.json` with priority, triggers, per-profile humor and voice rotation (`58f962b`).
 - soundd: `--version` flag and version in the startup log.

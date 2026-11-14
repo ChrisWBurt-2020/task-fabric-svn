@@ -150,9 +150,9 @@ visual / mobile / spoken / silent
 ```
 
 `task-fabric-svn-soundd` is one actuator behind that broker. Humor profiles
-are opt-in and never touch approvals, failures, or critical events — and
-every quip can be previewed with a dry run that speaks nothing and spends
-nothing.
+are opt-in and never touch approvals or critical events. Failure quips
+need a second opt-in (humor.on_failure, off by default) — and every quip
+can be previewed with a dry run that speaks nothing and spends nothing.
 
 ## Honest limits / roadmap
 

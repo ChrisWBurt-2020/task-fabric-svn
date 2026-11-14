@@ -105,8 +105,10 @@ when money or credentials are involved, the system stops rather than guesses.
 ### 3. The harness is a replaceable execution engine
 
 This is the core architectural bet. Projects declare agents (`opencode`,
-`codex`, `claude`, …) as data, not code paths. Actions are argument arrays —
-the runner never evaluates shell strings.
+`codex`, `claude`, …) as data, not code paths. Today the task fabric
+dispatches `opencode` only (Phase 1 supervisor allowlist); Codex and Claude
+can be declared and opened from the CLI but are not yet dispatched.
+Declared actions are argument arrays and never pass through a shell.
 
 ```text
                     Task Fabric SVN
@@ -116,6 +118,7 @@ the runner never evaluates shell strings.
           ┌───────────────┼───────────────┐
           │               │               │
         Codex          OpenCode          Claude
+   (not yet dispatched)             (not yet dispatched)
           │               │               │
           └────────── durable work ───────┘
 ```

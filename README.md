@@ -10,6 +10,8 @@ Built in Rust (5 crates) and Python as systemd user services for an
 Omarchy (Arch + Hyprland) desktop. It runs on the author's workstation,
 and the installer assumes Omarchy (see docs/INSTALL.md).
 
+See it run: [docs/demo-transcript.md](docs/demo-transcript.md) — captured `status --json` and task lifecycle output.
+
 ## What it does
 
 **Project registry + status.** Each project declares a repository, agents,

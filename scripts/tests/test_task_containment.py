@@ -52,6 +52,8 @@ class ProxyFixture:
 
 class ContainmentTests(unittest.TestCase):
     def setUp(self):
+        if not shutil.which("bwrap") or not shutil.which("socat"):
+            self.skipTest("containment runtime unavailable: bwrap and socat are required")
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.source = self.root / "source"
@@ -78,6 +80,8 @@ class ContainmentTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def boundary(self):
+        if not shutil.which("bwrap") or not shutil.which("socat"):
+            self.skipTest("containment runtime unavailable: bwrap and socat are required")
         boundary = TaskContainment(self.source, self.root / "state", "task-fixture", self.config)
         self.containments.append(boundary)
         return boundary
@@ -400,6 +404,8 @@ class ContainmentTests(unittest.TestCase):
     def require_bwrap(self, boundary):
         if not shutil.which("bwrap"):
             self.skipTest("bubblewrap missing: physical containment NOT QUALIFIED")
+        if not shutil.which("socat"):
+            self.skipTest("socat missing: containment runtime unavailable (proxy bridge)")
         rc, _, err = run_process(boundary.argv(["/bin/true"], inference=False), 5)
         if rc:
             self.fail("bubblewrap namespace unavailable; containment must remain disabled: " + err[:200])

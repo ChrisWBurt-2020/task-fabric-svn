@@ -151,12 +151,18 @@ class ProxyTest(unittest.TestCase):
             [sys.executable, str(Path(proxy_mod.__file__)), "--config", str(self.manifest_path),
              "--upstream", self.upstream.url],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        import socket as _sock
         deadline = time.time() + 10
-        while time.time() < deadline:
-            if self.sock_path.exists():
+        while True:
+            try:
+                with _sock.socket(_sock.AF_UNIX, _sock.SOCK_STREAM) as probe:
+                    probe.settimeout(1)
+                    probe.connect(str(self.sock_path))
                 break
-            time.sleep(0.05)
-        self.assertTrue(self.sock_path.exists(), "proxy did not bind its socket")
+            except OSError:
+                if time.time() > deadline:
+                    raise AssertionError("proxy did not start listening on its socket")
+                time.sleep(0.05)
 
     def tearDown(self):
         self.proc.terminate()

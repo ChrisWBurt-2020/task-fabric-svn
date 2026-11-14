@@ -6,7 +6,9 @@ separate durable task fabric dispatches bounded work to contained agent
 harnesses — with honest failure semantics and fail-closed spend control
 throughout.
 
-Built in Rust (5 crates) and Python, deployed as systemd user services.
+Built in Rust (5 crates) and Python as systemd user services for an
+Omarchy (Arch + Hyprland) desktop. It runs on the author's workstation,
+and the installer assumes Omarchy (see docs/INSTALL.md).
 
 ## What it does
 

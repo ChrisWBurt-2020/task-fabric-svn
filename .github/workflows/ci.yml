@@ -25,5 +25,8 @@ jobs:
         with:
           python-version: "3.11"
 
+      # Containment tests skip with a reason when bwrap cannot create
+      # namespaces in the runner environment (bubblewrap is installed
+      # above, but hosted runners restrict user namespaces).
       - name: Run Python tests
         run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
